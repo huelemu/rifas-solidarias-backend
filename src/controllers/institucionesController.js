@@ -1,4 +1,4 @@
-// src/controllers/institucionController.js
+// src/controllers/institucionesController.js
 import db from '../config/db.js';
 
 // GET /instituciones - Obtener todas las instituciones
