@@ -9,7 +9,7 @@ const options = {
       version: '1.0.0',
       description: 'Documentación de API para Rifas Solidarias',
     },
-    servers: [{ url: 'http://localhost:3000' }],
+    servers: [{ url: 'http://localhost:3100' }],
     components: {
       schemas: {
         Institucion: {
