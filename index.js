@@ -45,7 +45,13 @@ app.get('/test-db', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     mensaje: 'API Rifas Solidarias funcionando',
-    test: '/test-db'
+    endpoints: {
+      test: '/test-db',
+      instituciones: '/instituciones',
+      usuarios: '/usuarios',
+      rifas: '/rifas',
+      swagger: '/api-docs'
+    }
   });
 });
 
