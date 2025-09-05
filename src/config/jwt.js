@@ -5,8 +5,8 @@ import jwt from 'jsonwebtoken';
 export const JWT_CONFIG = {
   ACCESS_TOKEN_SECRET: process.env.JWT_ACCESS_SECRET || 'rifas_access_secret_key_muy_segura_2024',
   REFRESH_TOKEN_SECRET: process.env.JWT_REFRESH_SECRET || 'rifas_refresh_secret_key_muy_segura_2024',
-  ACCESS_TOKEN_EXPIRES: process.env.JWT_ACCESS_EXPIRES || '15m', // 15 minutos
-  REFRESH_TOKEN_EXPIRES: process.env.JWT_REFRESH_EXPIRES || '7d', // 7 días
+  ACCESS_TOKEN_EXPIRES: process.env.JWT_ACCESS_EXPIRES || '15m',
+  REFRESH_TOKEN_EXPIRES: process.env.JWT_REFRESH_EXPIRES || '7d',
 };
 
 // Generar Access Token
@@ -43,9 +43,4 @@ export const verifyRefreshToken = (token) => {
   } catch (error) {
     throw new Error('Token de actualización inválido o expirado');
   }
-};
-
-// Decodificar token sin verificar (para obtener info)
-export const decodeToken = (token) => {
-  return jwt.decode(token);
 };

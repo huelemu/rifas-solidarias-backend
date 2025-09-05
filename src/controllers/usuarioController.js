@@ -48,18 +48,12 @@ export const obtenerUsuarios = async (req, res) => {
 
     // Ejecutar consultas
     const [usuarios] = await db.execute(query, params);
-    const [totalResult] = await db.execute(countQuery, params.slice(0, -2)); // Sin limit y offset
+    const [totalResult] = await db.execute(countQuery, params.slice(0, -2));
     const total = totalResult[0].total;
-
-    // Remover password de los resultados
-    const usuariosSeguro = usuarios.map(usuario => {
-      const { password, ...usuarioSinPassword } = usuario;
-      return usuarioSinPassword;
-    });
 
     res.json({
       status: 'success',
-      data: usuariosSeguro,
+      data: usuarios,
       pagination: {
         current_page: parseInt(page),
         total_pages: Math.ceil(total / limit),
@@ -86,8 +80,7 @@ export const obtenerUsuarioPorId = async (req, res) => {
     const [usuarios] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
              u.rol, u.estado, u.fecha_creacion, u.fecha_actualizacion,
-             i.nombre as institucion_nombre, i.id as institucion_id,
-             i.email as institucion_email
+             i.nombre as institucion_nombre, i.id as institucion_id
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
       WHERE u.id = ?
@@ -100,32 +93,9 @@ export const obtenerUsuarioPorId = async (req, res) => {
       });
     }
 
-    // Obtener estadísticas adicionales según el rol
-    let estadisticas = {};
-    const usuario = usuarios[0];
-
-    if (usuario.rol === 'vendedor') {
-      const [ventasResult] = await db.execute(
-        'SELECT COUNT(*) as total_ventas FROM numeros WHERE vendedor_id = ? AND estado = "vendido"',
-        [id]
-      );
-      estadisticas.total_ventas = ventasResult[0].total_ventas;
-    }
-
-    if (usuario.rol === 'comprador') {
-      const [comprasResult] = await db.execute(
-        'SELECT COUNT(*) as total_compras FROM numeros WHERE comprador_id = ?',
-        [id]
-      );
-      estadisticas.total_compras = comprasResult[0].total_compras;
-    }
-
     res.json({
       status: 'success',
-      data: {
-        ...usuario,
-        estadisticas
-      }
+      data: usuarios[0]
     });
 
   } catch (error) {
@@ -172,44 +142,6 @@ export const crearUsuario = async (req, res) => {
       });
     }
 
-    // Validar password (mínimo 6 caracteres)
-    if (password.length < 6) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'La contraseña debe tener al menos 6 caracteres'
-      });
-    }
-
-    // Validar institución para roles que la requieren
-    if (['admin_institucion', 'vendedor'].includes(rol)) {
-      if (!institucion_id) {
-        return res.status(400).json({
-          status: 'error',
-          message: `El rol ${rol} requiere una institución asignada`
-        });
-      }
-
-      // Verificar que la institución existe y está activa
-      const [instituciones] = await db.execute(
-        'SELECT id, estado FROM instituciones WHERE id = ?',
-        [institucion_id]
-      );
-
-      if (instituciones.length === 0) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'La institución especificada no existe'
-        });
-      }
-
-      if (instituciones[0].estado !== 'activa') {
-        return res.status(400).json({
-          status: 'error',
-          message: 'La institución especificada no está activa'
-        });
-      }
-    }
-
     // Verificar que el email no esté en uso
     const [existingEmail] = await db.execute(
       'SELECT id FROM usuarios WHERE email = ?',
@@ -223,21 +155,6 @@ export const crearUsuario = async (req, res) => {
       });
     }
 
-    // Verificar DNI único si se proporciona
-    if (dni) {
-      const [existingDni] = await db.execute(
-        'SELECT id FROM usuarios WHERE dni = ?',
-        [dni]
-      );
-
-      if (existingDni.length > 0) {
-        return res.status(409).json({
-          status: 'error',
-          message: 'Ya existe un usuario con ese DNI'
-        });
-      }
-    }
-
     // Encriptar password
     const passwordHash = await bcrypt.hash(password, 10);
 
@@ -245,10 +162,19 @@ export const crearUsuario = async (req, res) => {
     const [result] = await db.execute(
       `INSERT INTO usuarios (nombre, apellido, email, password, telefono, dni, rol, institucion_id) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [nombre, apellido, email, passwordHash, telefono, dni, rol, institucion_id]
+      [
+        nombre, 
+        apellido, 
+        email, 
+        passwordHash, 
+        telefono || null, 
+        dni || null, 
+        rol, 
+        institucion_id || null
+      ]
     );
 
-    // Obtener el usuario creado (sin password)
+    // Obtener el usuario creado
     const [nuevoUsuario] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
              u.rol, u.estado, u.fecha_creacion,
@@ -278,10 +204,7 @@ export const crearUsuario = async (req, res) => {
 export const actualizarUsuario = async (req, res) => {
   try {
     const { id } = req.params;
-    const { 
-      nombre, apellido, email, telefono, dni, 
-      rol, institucion_id, estado, password 
-    } = req.body;
+    const { nombre, apellido, email, telefono, dni, rol, institucion_id, estado } = req.body;
 
     // Verificar que el usuario existe
     const [usuarios] = await db.execute(
@@ -296,61 +219,6 @@ export const actualizarUsuario = async (req, res) => {
       });
     }
 
-    // Validaciones
-    if (email) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Formato de email inválido'
-        });
-      }
-
-      // Verificar email único
-      const [existingEmail] = await db.execute(
-        'SELECT id FROM usuarios WHERE email = ? AND id != ?',
-        [email, id]
-      );
-
-      if (existingEmail.length > 0) {
-        return res.status(409).json({
-          status: 'error',
-          message: 'Ya existe otro usuario con ese email'
-        });
-      }
-    }
-
-    if (dni) {
-      const [existingDni] = await db.execute(
-        'SELECT id FROM usuarios WHERE dni = ? AND id != ?',
-        [dni, id]
-      );
-
-      if (existingDni.length > 0) {
-        return res.status(409).json({
-          status: 'error',
-          message: 'Ya existe otro usuario con ese DNI'
-        });
-      }
-    }
-
-    if (rol) {
-      const rolesValidos = ['admin_global', 'admin_institucion', 'vendedor', 'comprador'];
-      if (!rolesValidos.includes(rol)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Rol inválido. Debe ser: ' + rolesValidos.join(', ')
-        });
-      }
-    }
-
-    if (estado && !['activo', 'inactivo'].includes(estado)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Estado debe ser "activo" o "inactivo"'
-      });
-    }
-
     // Construir query de actualización
     const campos = [];
     const valores = [];
@@ -358,24 +226,11 @@ export const actualizarUsuario = async (req, res) => {
     if (nombre !== undefined) { campos.push('nombre = ?'); valores.push(nombre); }
     if (apellido !== undefined) { campos.push('apellido = ?'); valores.push(apellido); }
     if (email !== undefined) { campos.push('email = ?'); valores.push(email); }
-    if (telefono !== undefined) { campos.push('telefono = ?'); valores.push(telefono); }
-    if (dni !== undefined) { campos.push('dni = ?'); valores.push(dni); }
+    if (telefono !== undefined) { campos.push('telefono = ?'); valores.push(telefono || null); }
+    if (dni !== undefined) { campos.push('dni = ?'); valores.push(dni || null); }
     if (rol !== undefined) { campos.push('rol = ?'); valores.push(rol); }
-    if (institucion_id !== undefined) { campos.push('institucion_id = ?'); valores.push(institucion_id); }
+    if (institucion_id !== undefined) { campos.push('institucion_id = ?'); valores.push(institucion_id || null); }
     if (estado !== undefined) { campos.push('estado = ?'); valores.push(estado); }
-
-    // Manejar password si se proporciona
-    if (password) {
-      if (password.length < 6) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'La contraseña debe tener al menos 6 caracteres'
-        });
-      }
-      const passwordHash = await bcrypt.hash(password, 10);
-      campos.push('password = ?');
-      valores.push(passwordHash);
-    }
 
     if (campos.length === 0) {
       return res.status(400).json({
@@ -391,7 +246,7 @@ export const actualizarUsuario = async (req, res) => {
       valores
     );
 
-    // Obtener el usuario actualizado (sin password)
+    // Obtener el usuario actualizado
     const [usuarioActualizado] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
              u.rol, u.estado, u.fecha_creacion, u.fecha_actualizacion,
@@ -432,27 +287,6 @@ export const eliminarUsuario = async (req, res) => {
       return res.status(404).json({
         status: 'error',
         message: 'Usuario no encontrado'
-      });
-    }
-
-    // Verificar si tiene actividad asociada
-    const [ventasRealizadas] = await db.execute(
-      'SELECT COUNT(*) as total FROM numeros WHERE vendedor_id = ?',
-      [id]
-    );
-
-    const [comprasRealizadas] = await db.execute(
-      'SELECT COUNT(*) as total FROM numeros WHERE comprador_id = ?',
-      [id]
-    );
-
-    const totalActividad = ventasRealizadas[0].total + comprasRealizadas[0].total;
-
-    if (totalActividad > 0) {
-      return res.status(400).json({
-        status: 'error',
-        message: `No se puede eliminar el usuario. Tiene ${totalActividad} transacciones asociadas`,
-        suggestion: 'Cambia el estado a "inactivo" en su lugar'
       });
     }
 

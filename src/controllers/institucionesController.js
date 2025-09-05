@@ -133,11 +133,18 @@ export const crearInstitucion = async (req, res) => {
       });
     }
 
-    // Insertar nueva institución
+    // Insertar nueva institución (convertir undefined a null)
     const [result] = await db.execute(
       `INSERT INTO instituciones (nombre, descripcion, direccion, telefono, email, logo_url) 
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [nombre, descripcion, direccion, telefono, email, logo_url]
+      [
+        nombre, 
+        descripcion || null, 
+        direccion || null, 
+        telefono || null, 
+        email, 
+        logo_url || null
+      ]
     );
 
     // Obtener la institución creada

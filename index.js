@@ -46,12 +46,29 @@ app.get('/', (req, res) => {
   res.json({
     mensaje: 'API Rifas Solidarias funcionando',
     endpoints: {
-      test: '/test-db',
-      instituciones: '/instituciones',
-      usuarios: '/usuarios',
-      rifas: '/rifas',
-      swagger: '/api-docs'
+      auth: '/auth - Autenticación JWT',
+      test: '/test-db - Test de base de datos',
+      instituciones: '/instituciones - Gestión de instituciones',
+      usuarios: '/usuarios - Gestión de usuarios',
+      rifas: '/rifas - Gestión de rifas',
+      swagger: '/api-docs - Documentación completa'
     }
+  });
+});
+
+// Ruta de prueba simple para usuarios
+app.get('/usuarios-test', (req, res) => {
+  res.json({
+    status: 'success',
+    message: 'Ruta de prueba de usuarios funcionando'
+  });
+});
+
+app.post('/usuarios-test', (req, res) => {
+  res.json({
+    status: 'success',
+    message: 'POST de usuarios funcionando',
+    body: req.body
   });
 });
 
@@ -62,7 +79,7 @@ app.use('/rifas', rifasRoutes);
 // Swagger
 setupSwagger(app);
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3100;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor en http://localhost:${PORT}`);
 });
