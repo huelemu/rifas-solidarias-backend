@@ -1,4 +1,4 @@
-// index.js - Con configuración CORS corregida
+// index.js - Servidor completo con endpoints de estadísticas
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -9,6 +9,9 @@ import db from './src/config/db.js';
 import authRoutes from './src/routes/auth.js';
 import institucionRoutes from './src/routes/instituciones.js';
 import usuariosRoutes from './src/routes/usuarios.js';
+
+// Importar middleware de autenticación
+import { authenticateToken } from './src/middleware/auth.js';
 
 // Configurar variables de entorno
 dotenv.config();
@@ -59,6 +62,131 @@ app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${req.get('origin') || 'No origin'}`);
   next();
 });
+
+// =======================================
+// ENDPOINTS DE ESTADÍSTICAS (NUEVOS)
+// =======================================
+
+// Endpoint público para estadísticas básicas (sin autenticación)
+app.get('/stats/public', async (req, res) => {
+  try {
+    console.log('📊 Solicitando estadísticas públicas...');
+    
+    // Estadísticas que se pueden mostrar públicamente
+    const [totalInstituciones] = await db.execute(
+      'SELECT COUNT(*) as total FROM instituciones WHERE estado = "activa"'
+    );
+    
+    const [totalUsuarios] = await db.execute(
+      'SELECT COUNT(*) as total FROM usuarios WHERE estado = "activo"'
+    );
+    
+    // Mock data para rifas (hasta que implementemos el módulo)
+    const mockRifasActivas = 12;
+    const mockVentasDelMes = 45280;
+    
+    const estadisticas = {
+      instituciones_activas: totalInstituciones[0].total,
+      usuarios_registrados: totalUsuarios[0].total,
+      rifas_activas: mockRifasActivas,
+      ventas_del_mes: mockVentasDelMes,
+      ultima_actualizacion: new Date().toISOString()
+    };
+    
+    console.log('✅ Estadísticas públicas:', estadisticas);
+    
+    res.json({
+      status: 'success',
+      data: estadisticas
+    });
+    
+  } catch (error) {
+    console.error('❌ Error obteniendo estadísticas públicas:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error obteniendo estadísticas',
+      error: error.message
+    });
+  }
+});
+
+// Endpoint para estadísticas del usuario autenticado
+app.get('/stats/user', authenticateToken, async (req, res) => {
+  try {
+    const usuario = req.user;
+    console.log(`📊 Solicitando estadísticas para usuario: ${usuario.email} (${usuario.rol})`);
+    
+    // Estadísticas específicas del usuario según su rol
+    let userStats = {};
+    
+    if (usuario.rol === 'comprador') {
+      // Mock data para comprador (después implementaremos con rifas reales)
+      userStats = {
+        numeros_comprados: 15,
+        rifas_participando: 5,
+        gastos_total: 1250,
+        numeros_ganadores: 2
+      };
+    } else if (usuario.rol === 'vendedor') {
+      // Mock data para vendedor
+      userStats = {
+        numeros_vendidos: 85,
+        ventas_mes: 12500,
+        comision_ganada: 1250,
+        clientes_atendidos: 23
+      };
+    } else if (usuario.rol === 'admin_institucion') {
+      // Mock data para admin institución (después conectaremos con rifas reales)
+      userStats = {
+        rifas_creadas: 8,
+        ventas_institucion: 25000,
+        vendedores_activos: 4,
+        total_recaudado: 45000
+      };
+    } else if (usuario.rol === 'admin_global') {
+      // Stats globales para admin (combinando reales y mock)
+      const [totalUsuarios] = await db.execute(
+        'SELECT COUNT(*) as total FROM usuarios WHERE estado = "activo"'
+      );
+      
+      const [totalInst] = await db.execute(
+        'SELECT COUNT(*) as total FROM instituciones WHERE estado = "activa"'
+      );
+      
+      userStats = {
+        total_usuarios: totalUsuarios[0].total,
+        total_instituciones: totalInst[0].total,
+        rifas_globales: 25,
+        ventas_globales: 125000
+      };
+    }
+    
+    console.log('✅ Estadísticas del usuario:', userStats);
+    
+    res.json({
+      status: 'success',
+      data: {
+        usuario_rol: usuario.rol,
+        usuario_email: usuario.email,
+        institucion_id: usuario.institucion_id,
+        institucion_nombre: usuario.institucion_nombre,
+        estadisticas: userStats
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error obteniendo estadísticas del usuario:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error obteniendo estadísticas del usuario',
+      error: error.message
+    });
+  }
+});
+
+// =======================================
+// ENDPOINTS DE TESTING
+// =======================================
 
 // Test de conexión a BD mejorado
 app.get('/test-db', async (req, res) => {
@@ -139,7 +267,10 @@ app.get('/test-cors', (req, res) => {
   });
 });
 
-// Rutas principales
+// =======================================
+// RUTAS PRINCIPALES
+// =======================================
+
 app.use('/auth', authRoutes);
 app.use('/instituciones', institucionRoutes);
 app.use('/usuarios', usuariosRoutes);
@@ -162,6 +293,10 @@ app.get('/', (req, res) => {
         logout: 'POST /auth/logout - Cerrar sesión',
         profile: 'GET /auth/me - Obtener perfil'
       },
+      estadisticas: {
+        public: 'GET /stats/public - Estadísticas públicas',
+        user: 'GET /stats/user - Estadísticas del usuario (requiere auth)'
+      },
       instituciones: 'GET|POST|PUT|DELETE /instituciones - Gestión de instituciones',
       usuarios: 'GET|POST|PUT|DELETE /usuarios - Gestión de usuarios',
       testing: {
@@ -182,6 +317,10 @@ app.get('/', (req, res) => {
     }
   });
 });
+
+// =======================================
+// MIDDLEWARE DE MANEJO DE ERRORES
+// =======================================
 
 // Middleware de manejo de errores
 app.use((error, req, res, next) => {
@@ -214,6 +353,8 @@ app.use('*', (req, res) => {
       'GET /test-db',
       'GET /test-jwt',
       'GET /test-cors',
+      'GET /stats/public',
+      'GET /stats/user',
       'POST /auth/register',
       'POST /auth/login',
       'POST /auth/refresh',
@@ -226,6 +367,10 @@ app.use('*', (req, res) => {
   });
 });
 
+// =======================================
+// INICIAR SERVIDOR
+// =======================================
+
 const PORT = process.env.PORT || 3100;
 
 app.listen(PORT, () => {
@@ -237,6 +382,7 @@ app.listen(PORT, () => {
   console.log(`🔍 Test DB: http://localhost:${PORT}/test-db`);
   console.log(`🔐 Test JWT: http://localhost:${PORT}/test-jwt`);
   console.log(`🌐 Test CORS: http://localhost:${PORT}/test-cors`);
+  console.log(`📊 Stats Public: http://localhost:${PORT}/stats/public`);
   console.log('🚀 =======================================\n');
   
   // Verificar configuración de JWT
@@ -246,5 +392,6 @@ app.listen(PORT, () => {
   }
   
   console.log('✅ CORS configurado para origins múltiples');
+  console.log('✅ Endpoints de estadísticas agregados');
   console.log('✅ Servidor listo para recibir requests del frontend');
 });
