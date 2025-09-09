@@ -1,25 +1,36 @@
 {
-  "name": "rifas-backend",
+  "name": "rifas-solidarias-backend",
   "version": "1.0.0",
+  "description": "API Backend para sistema de rifas solidarias",
+  "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "test": "node test-api.js"
   },
   "dependencies": {
-    "bcrypt": "^6.0.0",
-    "cookie-parser": "^1.4.7",
+    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
-    "dotenv": "^16.0.0",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
-    "mysql2": "^3.3.3",
+    "mysql2": "^3.6.5",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.0"
   },
   "devDependencies": {
-    "@types/bcrypt": "^6.0.0",
-    "@types/jsonwebtoken": "^9.0.10",
     "nodemon": "^3.0.2"
-  }
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "mysql",
+    "rifas",
+    "api",
+    "jwt",
+    "auth"
+  ],
+  "author": "Juan Manuel Lacy",
+  "license": "MIT"
 }

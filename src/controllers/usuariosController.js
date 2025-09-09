@@ -1,4 +1,4 @@
-// src/controllers/usuarioController.js
+// src/controllers/usuariosController.js
 import db from '../config/db.js';
 import bcrypt from 'bcrypt';
 

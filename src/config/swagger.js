@@ -1,105 +1,257 @@
-import swaggerJsdoc from 'swagger-jsdoc';
+// src/config/swagger.js - Configuración Swagger con autenticación JWT
+import swaggerJSDoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
 const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Backend Rifas Solidarias',
+      title: 'API Rifas Solidarias',
       version: '1.0.0',
-      description: 'Documentación de API para Rifas Solidarias',
+      description: 'API REST para gestión de rifas solidarias con autenticación JWT',
+      contact: {
+        name: 'Huelemu',
+        email: 'juan.lacy@huelemu.com.ar'
+      }
     },
-    servers: [{ url: 'http://localhost:3100' }],
+    servers: [
+      {
+        url: 'http://localhost:3100',
+        description: 'Servidor de desarrollo'
+      }
+    ],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Ingresa tu access token JWT'
+        }
+      },
       schemas: {
+        Error: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              example: 'error'
+            },
+            message: {
+              type: 'string',
+              example: 'Descripción del error'
+            },
+            code: {
+              type: 'string',
+              example: 'ERROR_CODE'
+            }
+          }
+        },
+        Usuario: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'integer',
+              description: 'ID único del usuario'
+            },
+            nombre: {
+              type: 'string',
+              description: 'Nombre del usuario'
+            },
+            apellido: {
+              type: 'string',
+              description: 'Apellido del usuario'
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              description: 'Email único del usuario'
+            },
+            telefono: {
+              type: 'string',
+              description: 'Número de teléfono'
+            },
+            dni: {
+              type: 'string',
+              description: 'Documento de identidad'
+            },
+            rol: {
+              type: 'string',
+              enum: ['admin_global', 'admin_institucion', 'vendedor', 'comprador'],
+              description: 'Rol del usuario en el sistema'
+            },
+            estado: {
+              type: 'string',
+              enum: ['activo', 'inactivo'],
+              description: 'Estado actual del usuario'
+            },
+            institucion_id: {
+              type: 'integer',
+              description: 'ID de la institución asociada'
+            },
+            institucion_nombre: {
+              type: 'string',
+              description: 'Nombre de la institución asociada'
+            },
+            fecha_creacion: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Fecha de creación del usuario'
+            },
+            ultimo_login: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Último inicio de sesión'
+            }
+          }
+        },
         Institucion: {
           type: 'object',
           properties: {
-            id: { type: 'integer' },
-            nombre: { type: 'string' },
-            descripcion: { type: 'string' },
-            logo_url: { type: 'string' },
-          },
-          required: ['nombre'],
-        },
-        Rifa: {
-          type: 'object',
-          properties: {
-            id: { type: 'integer' },
-            nombre: { type: 'string' },
-            descripcion: { type: 'string' },
-            precio_boleto: { type: 'number', format: 'decimal' },
-            total_boletos: { type: 'integer' },
-            fecha_sorteo: { type: 'string', format: 'date' },
-            fecha_creacion: { type: 'string', format: 'date-time' },
-            estado: { type: 'string', enum: ['activa', 'finalizada', 'cancelada'] },
-            institucion_id: { type: 'integer' },
-            imagen_url: { type: 'string' },
-            premio_descripcion: { type: 'string' },
-            institucion_nombre: { type: 'string' },
-            institucion_logo: { type: 'string' }
-          },
-          required: ['nombre', 'precio_boleto', 'total_boletos', 'fecha_sorteo', 'institucion_id'],
-        },
-        RifaCreate: {
-          type: 'object',
-          properties: {
-            nombre: { type: 'string' },
-            descripcion: { type: 'string' },
-            precio_boleto: { type: 'number', format: 'decimal' },
-            total_boletos: { type: 'integer' },
-            fecha_sorteo: { type: 'string', format: 'date' },
-            institucion_id: { type: 'integer' },
-            imagen_url: { type: 'string' },
-            premio_descripcion: { type: 'string' }
-          },
-          required: ['nombre', 'precio_boleto', 'total_boletos', 'fecha_sorteo', 'institucion_id'],
-        },
-        RifaUpdate: {
-          type: 'object',
-          properties: {
-            nombre: { type: 'string' },
-            descripcion: { type: 'string' },
-            precio_boleto: { type: 'number', format: 'decimal' },
-            total_boletos: { type: 'integer' },
-            fecha_sorteo: { type: 'string', format: 'date' },
-            estado: { type: 'string', enum: ['activa', 'finalizada', 'cancelada'] },
-            imagen_url: { type: 'string' },
-            premio_descripcion: { type: 'string' }
+            id: {
+              type: 'integer',
+              description: 'ID único de la institución'
+            },
+            nombre: {
+              type: 'string',
+              description: 'Nombre de la institución'
+            },
+            descripcion: {
+              type: 'string',
+              description: 'Descripción de la institución'
+            },
+            direccion: {
+              type: 'string',
+              description: 'Dirección física'
+            },
+            telefono: {
+              type: 'string',
+              description: 'Teléfono de contacto'
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              description: 'Email de contacto'
+            },
+            logo_url: {
+              type: 'string',
+              description: 'URL del logo'
+            },
+            estado: {
+              type: 'string',
+              enum: ['activa', 'inactiva'],
+              description: 'Estado de la institución'
+            },
+            fecha_creacion: {
+              type: 'string',
+              format: 'date-time'
+            }
           }
-        },
-        Boleto: {
-          type: 'object',
-          properties: {
-            id: { type: 'integer' },
-            rifa_id: { type: 'integer' },
-            numero_boleto: { type: 'integer' },
-            comprador_nombre: { type: 'string' },
-            comprador_email: { type: 'string', format: 'email' },
-            comprador_telefono: { type: 'string' },
-            fecha_compra: { type: 'string', format: 'date-time' },
-            estado: { type: 'string', enum: ['reservado', 'pagado', 'cancelado'] }
-          },
-          required: ['rifa_id', 'numero_boleto', 'comprador_nombre'],
-        },
-        BoletoCompra: {
-          type: 'object',
-          properties: {
-            numero_boleto: { type: 'integer' },
-            comprador_nombre: { type: 'string' },
-            comprador_email: { type: 'string', format: 'email' },
-            comprador_telefono: { type: 'string' }
-          },
-          required: ['numero_boleto', 'comprador_nombre', 'comprador_email'],
         }
       },
+      responses: {
+        UnauthorizedError: {
+          description: 'Token de acceso requerido o inválido',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              }
+            }
+          }
+        },
+        ForbiddenError: {
+          description: 'No tienes permisos para esta acción',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              }
+            }
+          }
+        },
+        NotFoundError: {
+          description: 'Recurso no encontrado',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              }
+            }
+          }
+        },
+        ValidationError: {
+          description: 'Error de validación de datos',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              }
+            }
+          }
+        }
+      }
     },
+    security: [
+      {
+        bearerAuth: []
+      }
+    ],
+    tags: [
+      {
+        name: 'Autenticación',
+        description: 'Endpoints para registro, login y gestión de tokens'
+      },
+      {
+        name: 'Usuarios',
+        description: 'Gestión de usuarios del sistema'
+      },
+      {
+        name: 'Instituciones',
+        description: 'Gestión de instituciones'
+      },
+      {
+        name: 'Sistema',
+        description: 'Endpoints de testing y estado del sistema'
+      }
+    ]
   },
-  apis: ['./src/routes/*.js'],
+  apis: [
+    './src/routes/*.js',
+    './src/controllers/*.js'
+  ]
 };
 
-const swaggerSpec = swaggerJsdoc(options);
+const specs = swaggerJSDoc(options);
+
+// Configuración personalizada de Swagger UI
+const swaggerUiOptions = {
+  customCss: `
+    .swagger-ui .topbar { display: none }
+    .swagger-ui .info .title { color: #2c3e50; }
+    .swagger-ui .scheme-container { background: #f8f9fa; }
+  `,
+  customSiteTitle: 'API Rifas Solidarias - Documentación',
+  customfavIcon: '/favicon.ico',
+  swaggerOptions: {
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    docExpansion: 'list',
+    filter: true,
+    showExtensions: true,
+    tryItOutEnabled: true
+  }
+};
 
 export const setupSwagger = (app) => {
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  // Endpoint para el JSON de Swagger
+  app.get('/api-docs.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(specs);
+  });
+
+  // Documentación interactiva
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, swaggerUiOptions));
+  
+  console.log('📚 Swagger configurado en /api-docs');
 };
