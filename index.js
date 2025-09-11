@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { setupSwagger } from './src/config/swagger.js';
 import db from './src/config/db.js';
 
+
 // Importar rutas
 import authRoutes from './src/routes/auth.js';
 import institucionRoutes from './src/routes/instituciones.js';
@@ -12,6 +13,9 @@ import usuariosRoutes from './src/routes/usuarios.js';
 
 // Importar middleware de autenticación
 import { authenticateToken } from './src/middleware/auth.js';
+
+// Importar las nuevas rutas de rifas
+import rifasRoutes from './src/routes/rifas.js';
 
 // Configurar variables de entorno PRIMERO
 dotenv.config();
@@ -94,7 +98,7 @@ app.get('/', (req, res) => {
     server_time: new Date().toISOString(),
     frontend_url: 'https://rifas.huelemu.com.ar',
     backend_url: 'https://apirifas.huelemu.com.ar',
-    endpoints: [
+     endpoints: [
       'POST /auth/register',
       'POST /auth/login',
       'POST /auth/refresh',
@@ -102,6 +106,16 @@ app.get('/', (req, res) => {
       'GET /auth/me',
       'GET /instituciones',
       'GET /usuarios',
+      // ====== NUEVOS ENDPOINTS DE RIFAS ======
+      'GET /rifas',
+      'POST /rifas',
+      'GET /rifas/:id',
+      'PUT /rifas/:id',
+      'DELETE /rifas/:id',
+      'GET /rifas/:id/numeros',
+      'POST /rifas/:id/comprar',
+      'GET /rifas/user/mis-rifas',
+      // =======================================
       'GET /api-docs',
       'GET /test-db',
       'GET /test-jwt',
@@ -196,6 +210,28 @@ app.get('/test-huelemu', (req, res) => {
   });
 });
 
+//  Test específico para rifas
+app.get('/test-rifas', async (req, res) => {
+  try {
+    const [rifas] = await db.execute('SELECT COUNT(*) as total FROM rifas');
+    const [numeros] = await db.execute('SELECT COUNT(*) as total FROM numeros');
+    
+    res.json({
+      status: 'OK',
+      modulo: 'Rifas',
+      total_rifas: rifas[0].total,
+      total_numeros: numeros[0].total,
+      schema_version: '2.0 - Adaptado',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message
+    });
+  }
+});
+
 // =======================================
 // ENDPOINTS DE ESTADÍSTICAS
 // =======================================
@@ -272,6 +308,7 @@ console.log('🛣️ Configurando rutas...');
 app.use('/auth', authRoutes);
 app.use('/instituciones', institucionRoutes);
 app.use('/usuarios', usuariosRoutes);
+app.use('/rifas', rifasRoutes);
 
 console.log('✅ Rutas configuradas correctamente');
 
