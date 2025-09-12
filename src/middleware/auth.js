@@ -1,11 +1,40 @@
+// =====================================================
+// MIDDLEWARE DE AUTENTICACIÓN COMPLETO
 // src/middleware/auth.js
-import { verifyAccessToken } from '../config/jwt.js';
-import { isTokenBlacklisted } from '../controllers/authController.js';
+// =====================================================
+
+import jwt from 'jsonwebtoken';
 import db from '../config/db.js';
 
-// Middleware para verificar autenticación
-export const authenticateToken = async (req, res, next) => {
+// =====================================================
+// FUNCIONES AUXILIARES PARA JWT
+// =====================================================
+
+// Función para verificar access token
+const verifyAccessToken = (token) => {
   try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    throw new Error('Token inválido');
+  }
+};
+
+// Función para verificar refresh token
+const verifyRefreshToken = (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+  } catch (error) {
+    throw new Error('Refresh token inválido');
+  }
+};
+
+// =====================================================
+// MIDDLEWARE PRINCIPAL DE AUTENTICACIÓN
+// =====================================================
+
+export const requireAuth = async (req, res, next) => {
+  try {
+    // Obtener token del header
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
@@ -17,74 +46,86 @@ export const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // Verificar si el token está en blacklist
-    if (isTokenBlacklisted(token)) {
+    // Verificar token
+    let decoded;
+    try {
+      decoded = verifyAccessToken(token);
+    } catch (error) {
       return res.status(401).json({
         status: 'error',
-        message: 'Token inválido',
-        code: 'BLACKLISTED_TOKEN'
+        message: 'Token inválido o expirado',
+        code: 'INVALID_TOKEN'
       });
     }
 
-    // Verificar y decodificar token
-    const decoded = verifyAccessToken(token);
+    // Verificar si el token está en blacklist (si tienes la tabla)
+    try {
+      const [blacklisted] = await db.execute(
+        'SELECT id FROM tokens_invalidados WHERE jti = ? AND expira_en > NOW()',
+        [decoded.jti]
+      );
 
-    // Verificar que el usuario aún existe y está activo
+      if (blacklisted.length > 0) {
+        return res.status(401).json({
+          status: 'error',
+          message: 'Token invalidado',
+          code: 'TOKEN_BLACKLISTED'
+        });
+      }
+    } catch (dbError) {
+      // Si no existe la tabla de tokens invalidados, continuar
+      console.warn('Tabla tokens_invalidados no encontrada, saltando validación de blacklist');
+    }
+
+    // Obtener usuario de la base de datos
     const [usuarios] = await db.execute(
-      'SELECT id, email, rol, estado, institucion_id FROM usuarios WHERE id = ? AND estado = "activo"',
-      [decoded.id]
+      'SELECT id, email, rol, estado, institucion_id FROM usuarios WHERE id = ?',
+      [decoded.userId]
     );
 
-    if (usuarios.length === 0) {
+    if (!usuarios.length) {
       return res.status(401).json({
         status: 'error',
-        message: 'Usuario no válido o inactivo',
-        code: 'INVALID_USER'
+        message: 'Usuario no encontrado',
+        code: 'USER_NOT_FOUND'
       });
     }
 
-    // Agregar información del usuario a la request
-    req.user = {
-      id: decoded.id,
-      email: decoded.email,
-      rol: decoded.rol,
-      institucion_id: decoded.institucion_id,
-      institucion_nombre: decoded.institucion_nombre
-    };
+    const usuario = usuarios[0];
+
+    // Verificar estado del usuario
+    if (usuario.estado !== 'activo') {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Usuario inactivo o bloqueado',
+        code: 'USER_INACTIVE'
+      });
+    }
+
+    // Agregar usuario a la request
+    req.user = usuario;
+    req.tokenData = decoded;
 
     next();
 
   } catch (error) {
-    console.error('Error en authenticateToken:', error);
-    
-    if (error.message.includes('expirado') || error.message.includes('expired')) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Token expirado',
-        code: 'TOKEN_EXPIRED'
-      });
-    }
-
-    return res.status(401).json({
+    console.error('Error en middleware requireAuth:', error);
+    return res.status(500).json({
       status: 'error',
-      message: 'Token inválido',
-      code: 'INVALID_TOKEN'
+      message: 'Error interno del servidor'
     });
   }
 };
 
-// Middleware para verificar roles específicos
-export const requireRole = (rolesPermitidos) => {
-  // Si rolesPermitidos es un string, convertirlo a array
-  if (typeof rolesPermitidos === 'string') {
-    rolesPermitidos = [rolesPermitidos];
-  }
+// =====================================================
+// MIDDLEWARE DE ROLES
+// =====================================================
 
+export const requireRole = (rolesPermitidos) => {
   return (req, res, next) => {
     try {
-      const usuario = req.user;
-
-      if (!usuario) {
+      // Verificar que el usuario esté autenticado
+      if (!req.user) {
         return res.status(401).json({
           status: 'error',
           message: 'Usuario no autenticado',
@@ -92,19 +133,24 @@ export const requireRole = (rolesPermitidos) => {
         });
       }
 
-      if (!rolesPermitidos.includes(usuario.rol)) {
+      // Convertir a array si es un string
+      const roles = Array.isArray(rolesPermitidos) ? rolesPermitidos : [rolesPermitidos];
+
+      // Verificar si el usuario tiene uno de los roles permitidos
+      if (!roles.includes(req.user.rol)) {
         return res.status(403).json({
           status: 'error',
-          message: 'No tienes permisos para realizar esta acción',
+          message: 'No tienes permisos para acceder a este recurso',
           code: 'INSUFFICIENT_PERMISSIONS',
-          required_roles: rolesPermitidos,
-          user_role: usuario.rol
+          required_roles: roles,
+          user_role: req.user.rol
         });
       }
 
       next();
+
     } catch (error) {
-      console.error('Error en requireRole:', error);
+      console.error('Error en middleware requireRole:', error);
       return res.status(500).json({
         status: 'error',
         message: 'Error interno del servidor'
@@ -113,46 +159,10 @@ export const requireRole = (rolesPermitidos) => {
   };
 };
 
-// Middleware para verificar que el usuario pertenece a una institución específica
-export const requireInstitution = (req, res, next) => {
-  try {
-    const usuario = req.user;
-    const institucionId = req.params.institucionId || req.body.institucion_id;
+// =====================================================
+// MIDDLEWARE DE PROPIEDAD/OWNERSHIP
+// =====================================================
 
-    // Admin global puede acceder a cualquier institución
-    if (usuario.rol === 'admin_global') {
-      return next();
-    }
-
-    // Para otros roles, verificar que pertenecen a la institución
-    if (!usuario.institucion_id) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Usuario no asociado a ninguna institución',
-        code: 'NO_INSTITUTION'
-      });
-    }
-
-    // Si se especifica una institución, verificar que coincida
-    if (institucionId && parseInt(usuario.institucion_id) !== parseInt(institucionId)) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'No tienes permisos para esta institución',
-        code: 'WRONG_INSTITUTION'
-      });
-    }
-
-    next();
-  } catch (error) {
-    console.error('Error en requireInstitution:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
-  }
-};
-
-// Middleware para verificar propiedad de recurso (ejemplo: usuario solo puede editar sus datos)
 export const requireOwnership = (idField = 'id') => {
   return (req, res, next) => {
     try {
@@ -190,7 +200,10 @@ export const requireOwnership = (idField = 'id') => {
   };
 };
 
-// Middleware opcional (no requiere autenticación pero la usa si está presente)
+// =====================================================
+// MIDDLEWARE OPCIONAL (NO REQUIERE AUTENTICACIÓN)
+// =====================================================
+
 export const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -206,64 +219,187 @@ export const optionalAuth = async (req, res, next) => {
       
       // Verificar usuario
       const [usuarios] = await db.execute(
-        'SELECT id, email, rol, estado, institucion_id FROM usuarios WHERE id = ? AND estado = "activo"',
-        [decoded.id]
+        'SELECT id, email, rol, estado, institucion_id FROM usuarios WHERE id = ?',
+        [decoded.userId]
       );
 
-      if (usuarios.length > 0) {
-        req.user = {
-          id: decoded.id,
-          email: decoded.email,
-          rol: decoded.rol,
-          institucion_id: decoded.institucion_id,
-          institucion_nombre: decoded.institucion_nombre
-        };
+      if (usuarios.length && usuarios[0].estado === 'activo') {
+        req.user = usuarios[0];
+        req.tokenData = decoded;
       } else {
         req.user = null;
       }
-    } catch (error) {
+    } catch (tokenError) {
       req.user = null;
     }
 
     next();
+
   } catch (error) {
-    console.error('Error en optionalAuth:', error);
+    console.error('Error en middleware optionalAuth:', error);
     req.user = null;
     next();
   }
 };
 
-// Helper para combinar middlewares de auth y roles
-export const authorize = (roles = null) => {
-  const middlewares = [authenticateToken];
-  
-  if (roles) {
-    middlewares.push(requireRole(roles));
+// =====================================================
+// MIDDLEWARES ESPECÍFICOS POR ROL
+// =====================================================
+
+// Solo administradores globales
+export const requireAdmin = requireRole(['admin_global']);
+
+// Solo administradores (global o institución)
+export const requireAnyAdmin = requireRole(['admin_global', 'admin_institucion']);
+
+// Solo vendedores
+export const requireVendedor = requireRole(['vendedor']);
+
+// Vendedores y administradores
+export const requireVendedorOrAdmin = requireRole(['admin_global', 'admin_institucion', 'vendedor']);
+
+// =====================================================
+// MIDDLEWARE DE VERIFICACIÓN DE INSTITUCIÓN
+// =====================================================
+
+export const requireSameInstitution = async (req, res, next) => {
+  try {
+    const usuario = req.user;
+    
+    // Admin global tiene acceso a todo
+    if (usuario.rol === 'admin_global') {
+      return next();
+    }
+
+    // Obtener institución del recurso (esto dependerá del contexto)
+    const { institucion_id } = req.params;
+    
+    if (institucion_id && parseInt(usuario.institucion_id) !== parseInt(institucion_id)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Solo puedes acceder a recursos de tu institución',
+        code: 'DIFFERENT_INSTITUTION'
+      });
+    }
+
+    next();
+
+  } catch (error) {
+    console.error('Error en requireSameInstitution:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
   }
-  
-  return middlewares;
 };
 
-// Definiciones de permisos por rol
-export const ROLES = {
-  ADMIN_GLOBAL: 'admin_global',
-  ADMIN_INSTITUCION: 'admin_institucion', 
-  VENDEDOR: 'vendedor',
-  COMPRADOR: 'comprador'
+// =====================================================
+// MIDDLEWARE DE RATE LIMITING (BÁSICO)
+// =====================================================
+
+const rateLimitStore = new Map();
+
+export const rateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
+  return (req, res, next) => {
+    const key = req.ip;
+    const now = Date.now();
+    const windowStart = now - windowMs;
+
+    // Limpiar entradas antiguas
+    if (rateLimitStore.has(key)) {
+      const requests = rateLimitStore.get(key).filter(timestamp => timestamp > windowStart);
+      rateLimitStore.set(key, requests);
+    } else {
+      rateLimitStore.set(key, []);
+    }
+
+    const currentRequests = rateLimitStore.get(key);
+
+    if (currentRequests.length >= maxRequests) {
+      return res.status(429).json({
+        status: 'error',
+        message: 'Demasiadas solicitudes. Intenta más tarde.',
+        code: 'RATE_LIMIT_EXCEEDED',
+        retryAfter: Math.ceil(windowMs / 1000)
+      });
+    }
+
+    // Agregar timestamp actual
+    currentRequests.push(now);
+    rateLimitStore.set(key, currentRequests);
+
+    next();
+  };
 };
 
-export const PERMISSIONS = {
-  // Permisos para instituciones
-  MANAGE_ALL_INSTITUTIONS: [ROLES.ADMIN_GLOBAL],
-  MANAGE_OWN_INSTITUTION: [ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION],
+// =====================================================
+// FUNCIONES AUXILIARES EXPORTADAS
+// =====================================================
+
+export const generateTokens = (user) => {
+  const payload = {
+    userId: user.id,
+    email: user.email,
+    rol: user.rol,
+    institucion_id: user.institucion_id
+  };
+
+  const accessToken = jwt.sign(
+    { ...payload, jti: `${user.id}-${Date.now()}` },
+    process.env.JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+
+  const refreshToken = jwt.sign(
+    { ...payload, type: 'refresh' },
+    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  return { accessToken, refreshToken };
+};
+
+export const extractTokenFromHeader = (authHeader) => {
+  return authHeader && authHeader.split(' ')[1];
+};
+
+// =====================================================
+// MIDDLEWARE DE LOGGING DE AUTENTICACIÓN
+// =====================================================
+
+export const logAuthAttempt = async (req, res, next) => {
+  const originalSend = res.send;
   
-  // Permisos para usuarios
-  MANAGE_ALL_USERS: [ROLES.ADMIN_GLOBAL],
-  MANAGE_INSTITUTION_USERS: [ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION],
+  res.send = function(data) {
+    // Log del intento de autenticación
+    if (req.route && req.route.path && req.user) {
+      console.log(`Auth: ${req.user.email} (${req.user.rol}) accessed ${req.method} ${req.originalUrl}`);
+    }
+    
+    originalSend.call(this, data);
+  };
   
-  // Permisos para rifas
-  MANAGE_ALL_RIFAS: [ROLES.ADMIN_GLOBAL],
-  MANAGE_INSTITUTION_RIFAS: [ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION],
-  SELL_NUMBERS: [ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION, ROLES.VENDEDOR],
-  BUY_NUMBERS: [ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION, ROLES.VENDEDOR, ROLES.COMPRADOR]
+  next();
+};
+
+// =====================================================
+// EXPORTACIONES POR DEFECTO
+// =====================================================
+
+export default {
+  requireAuth,
+  requireRole,
+  requireOwnership,
+  optionalAuth,
+  requireAdmin,
+  requireAnyAdmin,
+  requireVendedor,
+  requireVendedorOrAdmin,
+  requireSameInstitution,
+  rateLimit,
+  generateTokens,
+  extractTokenFromHeader,
+  logAuthAttempt,
+  verifyAccessToken,
+  verifyRefreshToken
 };
