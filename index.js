@@ -400,6 +400,392 @@ try {
 }
 
 // =====================================================
+// DOCUMENTACIÓN SWAGGER PARA ENDPOINTS DE SISTEMA
+// Agregar esto a tu index.js después de los endpoints pero antes del errorHandler
+// =====================================================
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Sistema
+ *     description: Endpoints de monitoreo y estado del sistema
+ *   - name: Debug
+ *     description: Endpoints de debugging y testing (solo desarrollo)
+ *   - name: Autenticación
+ *     description: Endpoints de autenticación y autorización
+ *   - name: Usuarios
+ *     description: Gestión de usuarios del sistema
+ *   - name: Instituciones
+ *     description: Gestión de instituciones y organizaciones
+ *   - name: Rifas
+ *     description: Gestión de rifas y sorteos (próximamente)
+ */
+
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Health check básico del sistema
+ *     description: Retorna información básica del estado del servidor y endpoints disponibles
+ *     tags: [Sistema]
+ *     responses:
+ *       200:
+ *         description: Servidor funcionando correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: OK
+ *                 service:
+ *                   type: string
+ *                   example: Rifas Solidarias API
+ *                 version:
+ *                   type: string
+ *                   example: 2.0.0
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                 environment:
+ *                   type: string
+ *                   example: development
+ *                 endpoints:
+ *                   type: object
+ *                   properties:
+ *                     documentation:
+ *                       type: string
+ *                       example: /api-docs
+ *                     auth:
+ *                       type: string
+ *                       example: /auth
+ *                     institutions:
+ *                       type: string
+ *                       example: /instituciones
+ *                     users:
+ *                       type: string
+ *                       example: /usuarios
+ */
+
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Estado detallado del sistema
+ *     description: Verifica el estado del servidor, base de datos y recursos del sistema
+ *     tags: [Sistema]
+ *     responses:
+ *       200:
+ *         description: Sistema funcionando correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: OK
+ *                 database:
+ *                   type: string
+ *                   example: Connected
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                 uptime:
+ *                   type: number
+ *                   description: Tiempo de funcionamiento en segundos
+ *                   example: 3600.5
+ *                 memory:
+ *                   type: object
+ *                   properties:
+ *                     rss:
+ *                       type: number
+ *                     heapTotal:
+ *                       type: number
+ *                     heapUsed:
+ *                       type: number
+ *                     external:
+ *                       type: number
+ *       500:
+ *         description: Error en el sistema
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ERROR
+ *                 error:
+ *                   type: string
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ */
+
+/**
+ * @swagger
+ * /test-db:
+ *   get:
+ *     summary: Test detallado de conexión a base de datos
+ *     description: Verifica conectividad, versión y estado de las tablas principales
+ *     tags: [Sistema]
+ *     responses:
+ *       200:
+ *         description: Base de datos funcionando correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: OK
+ *                 conexion:
+ *                   type: integer
+ *                   example: 1
+ *                 base_datos:
+ *                   type: string
+ *                   example: rifas_solidarias_nuevo
+ *                 version:
+ *                   type: string
+ *                   example: 10.6.16-MariaDB
+ *                 total_tablas:
+ *                   type: integer
+ *                   example: 12
+ *                 total_usuarios:
+ *                   type: integer
+ *                   example: 8
+ *                 total_instituciones:
+ *                   type: integer
+ *                   example: 4
+ *                 tablas:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: ["usuarios", "instituciones", "rifas", "auth_logs"]
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       500:
+ *         description: Error de conexión a base de datos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ERROR
+ *                 error:
+ *                   type: string
+ *                 codigo:
+ *                   type: string
+ */
+
+/**
+ * @swagger
+ * /debug/usuarios:
+ *   get:
+ *     summary: Diagnóstico de usuarios (solo desarrollo)
+ *     description: Muestra estadísticas y últimos usuarios creados para debugging
+ *     tags: [Debug]
+ *     responses:
+ *       200:
+ *         description: Diagnóstico completado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     total_usuarios:
+ *                       type: integer
+ *                       example: 8
+ *                     ultimos_usuarios:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                           nombre:
+ *                             type: string
+ *                           apellido:
+ *                             type: string
+ *                           email:
+ *                             type: string
+ *                           rol:
+ *                             type: string
+ *                           fecha_creacion:
+ *                             type: string
+ *                             format: date-time
+ *                     usuarios_test:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ */
+
+/**
+ * @swagger
+ * /debug/limpiar-test:
+ *   delete:
+ *     summary: Limpiar usuarios de prueba (solo desarrollo)
+ *     description: Elimina todos los usuarios de testing y debug de la base de datos
+ *     tags: [Debug]
+ *     responses:
+ *       200:
+ *         description: Usuarios de prueba eliminados exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: 3 usuarios de prueba eliminados
+ *                 affected_rows:
+ *                   type: integer
+ *                   example: 3
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ */
+
+/**
+ * @swagger
+ * /debug/test-connection:
+ *   get:
+ *     summary: Test simple de conexión (solo desarrollo)
+ *     description: Verifica conexión básica a la base de datos
+ *     tags: [Debug]
+ *     responses:
+ *       200:
+ *         description: Conexión exitosa
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Conexión a base de datos exitosa
+ *                 result:
+ *                   type: object
+ *                   properties:
+ *                     test:
+ *                       type: integer
+ *                       example: 1
+ *                     timestamp:
+ *                       type: string
+ *                       format: date-time
+ */
+
+/**
+ * @swagger
+ * /debug/register-simple:
+ *   post:
+ *     summary: Registro simplificado con debug (solo desarrollo)
+ *     description: Endpoint de registro con logs detallados para debugging
+ *     tags: [Debug]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - nombre
+ *               - apellido
+ *               - email
+ *               - password
+ *             properties:
+ *               nombre:
+ *                 type: string
+ *                 example: Debug
+ *               apellido:
+ *                 type: string
+ *                 example: User
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: debug.user@test.com
+ *               password:
+ *                 type: string
+ *                 example: 123456
+ *               rol:
+ *                 type: string
+ *                 enum: [admin_global, admin_institucion, vendedor, comprador]
+ *                 default: comprador
+ *                 example: comprador
+ *     responses:
+ *       201:
+ *         description: Usuario creado exitosamente con información de debug
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Usuario creado exitosamente con debug
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                         nombre:
+ *                           type: string
+ *                         apellido:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         rol:
+ *                           type: string
+ *                     token:
+ *                       type: string
+ *                     debug:
+ *                       type: object
+ *                       properties:
+ *                         insertId:
+ *                           type: integer
+ *                         affectedRows:
+ *                           type: integer
+ *                         usuariosAntes:
+ *                           type: integer
+ *                         usuariosDespues:
+ *                           type: integer
+ *                         usuariosCreados:
+ *                           type: integer
+ *       409:
+ *         description: Email ya existe
+ *       500:
+ *         description: Error interno del servidor
+ * 
+ */
+
+// =====================================================
 // MIDDLEWARE DE ERRORES
 // =====================================================
 
