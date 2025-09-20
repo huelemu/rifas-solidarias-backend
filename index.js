@@ -1,131 +1,119 @@
-// index.js - Servidor completo corregido para Huelemu
+// =====================================================
+// SERVIDOR PRINCIPAL - RIFAS SOLIDARIAS BACKEND
+// index.js
+// =====================================================
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import db, { testConnection } from './src/config/db.js';
 import { setupSwagger } from './src/config/swagger.js';
-import db from './src/config/db.js';
+import { errorHandler } from './src/middleware/errorHandler.js';
 
-
-// Importar rutas
+// Importar rutas existentes
 import authRoutes from './src/routes/auth.js';
 import institucionRoutes from './src/routes/instituciones.js';
 import usuariosRoutes from './src/routes/usuarios.js';
+// import rifasRoutes from './src/routes/rifas.js'; // Comentado temporalmente
 
-// Importar middleware de autenticación
-import { authenticateToken } from './src/middleware/auth.js';
+// =====================================================
+// CONFIGURACIÓN INICIAL
+// =====================================================
 
-// Importar las nuevas rutas de rifas
-import rifasRoutes from './src/routes/rifas.js';
-
-// Configurar variables de entorno PRIMERO
 dotenv.config();
 
-// Crear la aplicación Express
 const app = express();
+const PORT = process.env.PORT || 3100;
 
-console.log('🔧 Iniciando servidor...');
-console.log('📦 Express app creada correctamente');
+console.log('\n🚀 =======================================');
+console.log('   🎯 RIFAS SOLIDARIAS - BACKEND API');
+console.log('🚀 =======================================\n');
 
-// CONFIGURACIÓN CORS ACTUALIZADA PARA HUELEMU
+// =====================================================
+// MIDDLEWARE GLOBAL
+// =====================================================
+
+// CORS configurado para desarrollo y producción
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permitir requests sin origin (como apps móviles, Postman, etc.)
-    if (!origin) return callback(null, true);
-    
-    // Lista de origins permitidos - ACTUALIZADA PARA HUELEMU
     const allowedOrigins = [
-      // Desarrollo local
-      'http://localhost:3000',
-      'http://localhost:3001', 
-      'http://localhost:5173',
-      'http://localhost:8080',
-      'http://127.0.0.1:8080',
-      'http://localhost:8000',
-      'http://127.0.0.1:8000',
-      'http://localhost:3100', // Para Swagger
-      
-      // PRODUCCIÓN HUELEMU
-      'https://rifas.huelemu.com.ar',      // Frontend principal
-      'http://rifas.huelemu.com.ar',       // Fallback sin SSL
-      'https://apirifas.huelemu.com.ar',   // Backend (para Swagger)
-      'http://apirifas.huelemu.com.ar',    // Fallback sin SSL
-      
-      // Subdominios adicionales
-      'https://www.rifas.huelemu.com.ar',
-      'http://www.rifas.huelemu.com.ar',
-    ];
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
+      'http://localhost:3000',    // React dev
+      'http://localhost:3001',    // React alt port
+      'http://localhost:4200',    // Angular dev
+      'http://localhost:5173',    // Vite dev
+      'https://rifas.huelemu.com.ar',  // Producción frontend
+      process.env.FRONTEND_URL,   // URL de producción adicional
+    ].filter(Boolean);
+
+    // En desarrollo, permitir requests sin origin (Postman, curl, etc.)
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log('🚫 CORS blocked origin:', origin);
-      callback(null, true); // En desarrollo, permitir todos los origins
+      callback(new Error('No permitido por CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
-// Aplicar CORS
 app.use(cors(corsOptions));
-console.log('🌐 CORS configurado correctamente');
-
-// Middleware adicional para manejar preflight requests
-app.options('*', cors(corsOptions));
-
-// Middleware para parsing de JSON
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Middleware para logging de requests
-app.use((req, res, next) => {
-  const origin = req.get('origin') || 'No origin';
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${origin}`);
-  next();
-});
+// Logger de requests simple (solo en desarrollo)
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    const timestamp = new Date().toISOString();
+    console.log(`📡 [${timestamp}] ${req.method} ${req.originalUrl} - ${req.ip}`);
+    next();
+  });
+}
 
-// =======================================
-// ENDPOINTS DE TESTING
-// =======================================
+// =====================================================
+// VERIFICACIÓN DE SISTEMA
+// =====================================================
 
-// Ruta raíz
+// Health check endpoint
 app.get('/', (req, res) => {
   res.json({
-    mensaje: 'API Rifas Solidarias - Huelemu',
-    version: '1.0.0',
-    status: 'Funcionando correctamente',
-    server_time: new Date().toISOString(),
-    frontend_url: 'https://rifas.huelemu.com.ar',
-    backend_url: 'https://apirifas.huelemu.com.ar',
-     endpoints: [
-      'POST /auth/register',
-      'POST /auth/login',
-      'POST /auth/refresh',
-      'POST /auth/logout',
-      'GET /auth/me',
-      'GET /instituciones',
-      'GET /usuarios',
-      // ====== NUEVOS ENDPOINTS DE RIFAS ======
-      'GET /rifas',
-      'POST /rifas',
-      'GET /rifas/:id',
-      'PUT /rifas/:id',
-      'DELETE /rifas/:id',
-      'GET /rifas/:id/numeros',
-      'POST /rifas/:id/comprar',
-      'GET /rifas/user/mis-rifas',
-      // =======================================
-      'GET /api-docs',
-      'GET /test-db',
-      'GET /test-jwt',
-      'GET /test-cors',
-      'GET /test-huelemu'
-    ]
+    status: 'OK',
+    service: 'Rifas Solidarias API',
+    version: '2.0.0',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    endpoints: {
+      documentation: '/api-docs',
+      auth: '/auth',
+      institutions: '/instituciones',
+      users: '/usuarios',
+      debug: '/debug/usuarios'
+    }
   });
 });
 
-// Test de conexión a BD
+// Test de conexión a base de datos
+app.get('/health', async (req, res) => {
+  try {
+    const dbConnected = await testConnection();
+    
+    res.json({
+      status: 'OK',
+      database: dbConnected ? 'Connected' : 'Disconnected',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: process.memoryUsage()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Test detallado de base de datos
 app.get('/test-db', async (req, res) => {
   try {
     console.log('🔍 Probando conexión a base de datos...');
@@ -146,6 +134,7 @@ app.get('/test-db', async (req, res) => {
       total_tablas: tablas.length,
       total_usuarios: usuarios[0].total,
       total_instituciones: instituciones[0].total,
+      tablas: tablas.map(table => Object.values(table)[0]),
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -158,247 +147,361 @@ app.get('/test-db', async (req, res) => {
   }
 });
 
-// Test específico para JWT
-app.get('/test-jwt', (req, res) => {
-  const jwtConfig = {
-    access_secret: process.env.JWT_ACCESS_SECRET ? '✅ Configurado' : '❌ Falta configurar',
-    refresh_secret: process.env.JWT_REFRESH_SECRET ? '✅ Configurado' : '❌ Falta configurar',
-    access_expires: process.env.JWT_ACCESS_EXPIRES || '15m (default)',
-    refresh_expires: process.env.JWT_REFRESH_EXPIRES || '7d (default)'
-  };
-
-  res.json({
-    status: 'JWT Configuration',
-    config: jwtConfig,
-    warnings: [
-      !process.env.JWT_ACCESS_SECRET && 'JWT_ACCESS_SECRET no configurado',
-      !process.env.JWT_REFRESH_SECRET && 'JWT_REFRESH_SECRET no configurado'
-    ].filter(Boolean)
-  });
-});
-
-// Test específico para CORS
-app.get('/test-cors', (req, res) => {
-  const origin = req.get('origin');
-  
-  res.json({
-    message: '✅ CORS funcionando correctamente',
-    timestamp: new Date().toISOString(),
-    origin: origin,
-    frontend_url_esperada: 'https://rifas.huelemu.com.ar',
-    backend_url: 'https://apirifas.huelemu.com.ar',
-    cors_status: '✅ Configurado para Huelemu'
-  });
-});
-
-// Test específico para Huelemu
-app.get('/test-huelemu', (req, res) => {
-  const expectedOrigin = 'https://rifas.huelemu.com.ar';
-  const actualOrigin = req.get('origin');
-  
-  res.json({
-    message: '🔍 Test específico para Huelemu',
-    status: actualOrigin === expectedOrigin ? '✅ CORRECTO' : '⚠️ VERIFICAR',
-    expected_origin: expectedOrigin,
-    actual_origin: actualOrigin,
-    backend_url: 'https://apirifas.huelemu.com.ar',
-    recommendations: actualOrigin !== expectedOrigin ? [
-      'Verificar que estés accediendo desde https://rifas.huelemu.com.ar',
-      'Verificar configuración SSL',
-      'Revisar DNS del dominio'
-    ] : ['Todo configurado correctamente']
-  });
-});
-
-//  Test específico para rifas
-app.get('/test-rifas', async (req, res) => {
-  try {
-    const [rifas] = await db.execute('SELECT COUNT(*) as total FROM rifas');
-    const [numeros] = await db.execute('SELECT COUNT(*) as total FROM numeros');
-    
-    res.json({
-      status: 'OK',
-      modulo: 'Rifas',
-      total_rifas: rifas[0].total,
-      total_numeros: numeros[0].total,
-      schema_version: '2.0 - Adaptado',
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'ERROR',
-      error: error.message
-    });
-  }
-});
-
-// =======================================
-// ENDPOINTS DE ESTADÍSTICAS
-// =======================================
-
-// Estadísticas públicas
-app.get('/stats/public', async (req, res) => {
-  try {
-    console.log('📊 Solicitando estadísticas públicas...');
-    
-    const [totalInstituciones] = await db.execute(
-      'SELECT COUNT(*) as total FROM instituciones'
-    );
-    
-    const [totalUsuarios] = await db.execute(
-      'SELECT COUNT(*) as total FROM usuarios'
-    );
-    
-    const [usuariosPorRol] = await db.execute(
-      'SELECT rol, COUNT(*) as cantidad FROM usuarios GROUP BY rol'
-    );
-    
-    res.json({
-      status: 'OK',
-      timestamp: new Date().toISOString(),
-      estadisticas: {
-        total_instituciones: totalInstituciones[0].total,
-        total_usuarios: totalUsuarios[0].total,
-        usuarios_por_rol: usuariosPorRol
-      }
-    });
-  } catch (error) {
-    console.error('❌ Error en estadísticas públicas:', error);
-    res.status(500).json({
-      status: 'ERROR',
-      error: error.message
-    });
-  }
-});
-
-// Estadísticas de usuario (requiere autenticación)
-app.get('/stats/user', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    // Estadísticas específicas del usuario
-    const [userStats] = await db.execute(
-      'SELECT * FROM usuarios WHERE id = ?',
-      [userId]
-    );
-    
-    res.json({
-      status: 'OK',
-      user_id: userId,
-      estadisticas: {
-        perfil: userStats[0],
-        ultima_conexion: new Date().toISOString()
-      }
-    });
-  } catch (error) {
-    console.error('❌ Error en estadísticas de usuario:', error);
-    res.status(500).json({
-      status: 'ERROR',
-      error: error.message
-    });
-  }
-});
-
-// =======================================
+// =====================================================
 // RUTAS PRINCIPALES
-// =======================================
+// =====================================================
 
 console.log('🛣️ Configurando rutas...');
 
+// Rutas de autenticación
 app.use('/auth', authRoutes);
+
+// Rutas de recursos principales
 app.use('/instituciones', institucionRoutes);
 app.use('/usuarios', usuariosRoutes);
-app.use('/rifas', rifasRoutes);
+
+// Rutas de rifas (comentado temporalmente)
+// app.use('/rifas', rifasRoutes);
 
 console.log('✅ Rutas configuradas correctamente');
 
-// =======================================
+// =====================================================
+// ENDPOINTS DE DEBUG TEMPORAL
+// =====================================================
+
+// Ver estado de usuarios
+app.get('/debug/usuarios', async (req, res) => {
+  try {
+    console.log('🔍 Ejecutando diagnóstico de usuarios...');
+    
+    const [count] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
+    const [ultimos] = await db.execute(`
+      SELECT id, nombre, apellido, email, rol, fecha_creacion
+      FROM usuarios ORDER BY id DESC LIMIT 10
+    `);
+    
+    const [testUsers] = await db.execute(`
+      SELECT id, nombre, apellido, email, rol, fecha_creacion
+      FROM usuarios 
+      WHERE email LIKE '%test%' OR email LIKE '%debug%'
+      ORDER BY id DESC
+    `);
+    
+    console.log('✅ Consultas de diagnóstico ejecutadas');
+    
+    res.json({
+      status: 'success',
+      timestamp: new Date().toISOString(),
+      data: {
+        total_usuarios: count[0].total,
+        ultimos_usuarios: ultimos,
+        usuarios_test: testUsers
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error en diagnóstico:', error);
+    res.status(500).json({ 
+      status: 'error',
+      error: error.message
+    });
+  }
+});
+
+// Limpiar usuarios de prueba
+app.delete('/debug/limpiar-test', async (req, res) => {
+  try {
+    console.log('🧹 Limpiando usuarios de prueba...');
+    
+    const [result] = await db.execute(`
+      DELETE FROM usuarios 
+      WHERE email LIKE '%test%' 
+      OR email LIKE '%debug%'
+      OR email LIKE '%ejemplo%'
+    `);
+    
+    console.log(`✅ Eliminados ${result.affectedRows} usuarios de prueba`);
+    
+    res.json({
+      status: 'success',
+      message: `${result.affectedRows} usuarios de prueba eliminados`,
+      affected_rows: result.affectedRows,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error limpiando:', error);
+    res.status(500).json({ 
+      status: 'error',
+      error: error.message 
+    });
+  }
+});
+
+// Test simple de conexión
+app.get('/debug/test-connection', async (req, res) => {
+  try {
+    const [result] = await db.execute('SELECT 1 as test, NOW() as timestamp');
+    
+    res.json({
+      status: 'success',
+      message: 'Conexión a base de datos exitosa',
+      result: result[0]
+    });
+    
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'error',
+      error: error.message 
+    });
+  }
+});
+
+// Registro simplificado para debug
+app.post('/debug/register-simple', async (req, res) => {
+  console.log('\n🧪 ================================');
+  console.log('   REGISTRO SIMPLIFICADO - DEBUG');
+  console.log('🧪 ================================');
+  
+  try {
+    const { nombre, apellido, email, password, rol = 'comprador' } = req.body;
+    
+    console.log('📝 Datos recibidos:', { nombre, apellido, email, rol });
+
+    // Verificar email único
+    console.log('🔍 Verificando email único...');
+    const [existing] = await db.execute('SELECT id, email FROM usuarios WHERE email = ?', [email]);
+    
+    if (existing.length > 0) {
+      console.log('❌ Email ya existe:', existing[0]);
+      return res.status(409).json({
+        status: 'error',
+        message: 'Email ya existe',
+        debug: { existingUser: existing[0] }
+      });
+    }
+    console.log('✅ Email disponible');
+
+    // Hash de password
+    console.log('🔍 Encriptando password...');
+    const bcrypt = await import('bcrypt');
+    const hashedPassword = await bcrypt.default.hash(password, 10);
+    console.log('✅ Password encriptado');
+
+    // Contar usuarios antes
+    console.log('🔍 Contando usuarios ANTES del insert...');
+    const [beforeCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
+    console.log('📊 Usuarios antes:', beforeCount[0].total);
+
+    // INSERT con máximo detalle
+    console.log('🔍 Ejecutando INSERT...');
+    const insertSQL = `INSERT INTO usuarios (nombre, apellido, email, password, rol) VALUES (?, ?, ?, ?, ?)`;
+    const insertParams = [nombre, apellido, email, hashedPassword, rol];
+    
+    const [insertResult] = await db.execute(insertSQL, insertParams);
+    
+    console.log('✅ INSERT ejecutado:', {
+      insertId: insertResult.insertId,
+      affectedRows: insertResult.affectedRows
+    });
+
+    // Verificar que se insertó
+    console.log('🔍 Verificando inserción...');
+    const [afterCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
+    console.log('📊 Usuarios después:', afterCount[0].total);
+    
+    const usuariosCreados = afterCount[0].total - beforeCount[0].total;
+    console.log('📈 Usuarios creados:', usuariosCreados);
+
+    // Recuperar usuario insertado
+    console.log('🔍 Recuperando usuario creado...');
+    const [newUser] = await db.execute('SELECT * FROM usuarios WHERE id = ?', [insertResult.insertId]);
+    
+    if (newUser.length === 0) {
+      throw new Error(`Usuario con ID ${insertResult.insertId} no encontrado después del INSERT`);
+    }
+    
+    console.log('✅ Usuario recuperado:', { id: newUser[0].id, email: newUser[0].email });
+
+    // Generar token simple
+    console.log('🔍 Generando token...');
+    const jwt = await import('jsonwebtoken');
+    const token = jwt.default.sign(
+      { id: insertResult.insertId, email }, 
+      process.env.JWT_SECRET || 'default_secret', 
+      { expiresIn: '1h' }
+    );
+    console.log('✅ Token generado');
+
+    console.log('🎉 REGISTRO COMPLETADO EXITOSAMENTE\n');
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Usuario creado exitosamente con debug',
+      data: {
+        user: {
+          id: newUser[0].id,
+          nombre: newUser[0].nombre,
+          apellido: newUser[0].apellido,
+          email: newUser[0].email,
+          rol: newUser[0].rol
+        },
+        token,
+        debug: {
+          insertId: insertResult.insertId,
+          affectedRows: insertResult.affectedRows,
+          usuariosAntes: beforeCount[0].total,
+          usuariosDespues: afterCount[0].total,
+          usuariosCreados: usuariosCreados
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('💥 ERROR EN REGISTRO SIMPLIFICADO:');
+    console.error('📝 Mensaje:', error.message);
+    console.error('📚 Stack:', error.stack);
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Error en registro simplificado',
+      debug: {
+        error: error.message,
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+});
+
+// =====================================================
+// RUTAS DE UTILIDAD
+// =====================================================
+
+// Test de CORS (solo en desarrollo)
+if (process.env.NODE_ENV === 'development') {
+  app.get('/test-cors', (req, res) => {
+    res.json({
+      message: 'CORS funcionando correctamente',
+      origin: req.get('Origin'),
+      timestamp: new Date().toISOString()
+    });
+  });
+}
+
+// =====================================================
 // DOCUMENTACIÓN SWAGGER
-// =======================================
+// =====================================================
 
 try {
   setupSwagger(app);
-  console.log('📚 Swagger configurado correctamente');
+  console.log('📚 Swagger configurado en /api-docs');
 } catch (error) {
   console.warn('⚠️ Error configurando Swagger:', error.message);
 }
 
-// =======================================
+// =====================================================
 // MIDDLEWARE DE ERRORES
-// =======================================
+// =====================================================
 
-// Middleware de manejo de errores
-app.use((error, req, res, next) => {
-  console.error('❌ Error no manejado:', error);
-  
-  if (error.type === 'entity.parse.failed') {
-    return res.status(400).json({
-      status: 'error',
-      message: 'JSON inválido en el cuerpo de la petición'
-    });
-  }
-  
-  res.status(500).json({
-    status: 'error',
-    message: 'Error interno del servidor',
-    ...(process.env.NODE_ENV === 'development' && { details: error.message })
-  });
-});
-
-// Manejo de rutas no encontradas
+// Middleware para rutas no encontradas
 app.use('*', (req, res) => {
-  console.log(`🔍 Ruta no encontrada: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     status: 'error',
     message: 'Endpoint no encontrado',
     path: req.originalUrl,
     method: req.method,
+    timestamp: new Date().toISOString(),
     available_endpoints: [
       'GET /',
+      'GET /health',
       'GET /test-db',
-      'GET /test-jwt', 
-      'GET /test-cors',
-      'GET /test-huelemu',
-      'GET /stats/public',
-      'POST /auth/register',
+      'GET /api-docs',
       'POST /auth/login',
+      'POST /auth/register',
       'GET /instituciones',
       'GET /usuarios',
-      'GET /api-docs'
+      'GET /debug/usuarios',
+      'POST /debug/register-simple'
     ]
   });
 });
 
-// =======================================
-// INICIAR SERVIDOR
-// =======================================
+// Middleware global de manejo de errores
+app.use(errorHandler);
 
-const PORT = process.env.PORT || 3100;
+// =====================================================
+// INICIALIZACIÓN DEL SERVIDOR
+// =====================================================
 
-app.listen(PORT, () => {
-  console.log('\n🚀 =======================================');
-  console.log(`   🎯 SERVIDOR HUELEMU INICIADO`);
-  console.log('🚀 =======================================');
-  console.log(`📍 Backend URL: https://apirifas.huelemu.com.ar`);
-  console.log(`📍 Frontend URL: https://rifas.huelemu.com.ar`);
-  console.log(`🔧 Puerto local: ${PORT}`);
-  console.log(`📚 Docs: https://apirifas.huelemu.com.ar/api-docs`);
-  console.log(`🔍 Test DB: https://apirifas.huelemu.com.ar/test-db`);
-  console.log(`🔐 Test JWT: https://apirifas.huelemu.com.ar/test-jwt`);
-  console.log(`🌐 Test CORS: https://apirifas.huelemu.com.ar/test-cors`);
-  console.log(`🎯 Test Huelemu: https://apirifas.huelemu.com.ar/test-huelemu`);
-  console.log('🚀 =======================================\n');
-  
-  // Verificar configuración de JWT
-  if (!process.env.JWT_ACCESS_SECRET || !process.env.JWT_REFRESH_SECRET) {
-    console.log('⚠️  WARNING: JWT secrets usando valores por defecto');
-    console.log('   Configura JWT_ACCESS_SECRET y JWT_REFRESH_SECRET en .env');
-  } else {
-    console.log('✅ JWT secrets configurados correctamente');
+async function startServer() {
+  try {
+    // Verificar conexión a base de datos
+    console.log('🔍 Verificando conexión a base de datos...');
+    const dbConnected = await testConnection();
+    
+    if (!dbConnected) {
+      console.error('❌ No se pudo conectar a la base de datos');
+      console.error('   Verifica tu configuración en .env');
+      process.exit(1);
+    }
+    
+    // Iniciar servidor
+    app.listen(PORT, () => {
+      console.log('\n🎉 =======================================');
+      console.log(`   ✅ SERVIDOR INICIADO EXITOSAMENTE`);
+      console.log(`   🌐 URL: http://localhost:${PORT}`);
+      console.log(`   📚 Docs: http://localhost:${PORT}/api-docs`);
+      console.log(`   🏥 Health: http://localhost:${PORT}/health`);
+      console.log(`   🗄️ Base de datos: ${process.env.DB_NAME}`);
+      console.log(`   🔧 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+      console.log('🎉 =======================================\n');
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💡 ENDPOINTS DE DEBUG DISPONIBLES:');
+        console.log('   • GET /debug/usuarios - Ver estado de usuarios');
+        console.log('   • DELETE /debug/limpiar-test - Limpiar usuarios de prueba');
+        console.log('   • POST /debug/register-simple - Registro con debug');
+        console.log('   • GET /debug/test-connection - Test de conexión\n');
+      }
+    });
+    
+  } catch (error) {
+    console.error('\n💥 =======================================');
+    console.error('   ❌ ERROR AL INICIAR SERVIDOR');
+    console.error('💥 =======================================');
+    console.error('Error:', error.message);
+    
+    console.log('\n🔧 POSIBLES SOLUCIONES:');
+    console.log('1. Verificar que MariaDB esté ejecutándose');
+    console.log('2. Revisar configuración en .env');
+    console.log('3. Verificar que la base de datos exista');
+    console.log('4. Revisar permisos de usuario de base de datos');
+    
+    process.exit(1);
   }
-  
-  console.log('✅ CORS configurado para Huelemu');
-  console.log('✅ Base de datos conectada');
-  console.log('✅ Servidor listo para recibir requests');
-  console.log('\n🎉 ¡Servidor funcionando correctamente!');
+}
+
+// Manejo de errores no capturados
+process.on('uncaughtException', (error) => {
+  console.error('💥 Excepción no capturada:', error);
+  process.exit(1);
 });
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Promesa rechazada no manejada:', reason);
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('\n👋 Cerrando servidor...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('\n👋 Cerrando servidor...');
+  process.exit(0);
+});
+
+// Iniciar servidor
+startServer();

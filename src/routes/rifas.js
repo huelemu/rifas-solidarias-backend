@@ -1,359 +1,208 @@
-// =====================================================
-// RUTAS DEL SISTEMA DE RIFAS
+// ===================================================
 // src/routes/rifas.js
-// =====================================================
+// CREAR ESTE ARCHIVO EN: src/routes/rifas.js
+// ===================================================
 
-import { Router } from 'express';
-import { body } from 'express-validator';
-import rifasController, { rifasValidations } from '../controllers/rifasController.js';
-import { requireAuth, requireRole, requireOwnership } from '../middleware/auth.js';
+import express from 'express';
+import { body, param } from 'express-validator';
+import rifasController from '../controllers/rifasController.js';
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { validarErrores } from '../middleware/validations.js';
 
-const router = Router();
+const router = express.Router();
 
-// =====================================================
-// MIDDLEWARE ESPECÍFICO PARA RIFAS
-// =====================================================
+// ===================================================
+// RUTAS PÚBLICAS (sin autenticación)
+// ===================================================
 
-// Middleware para verificar permisos sobre una rifa específica
-const verificarPermisoRifa = async (req, res, next) => {
-  try {
-    const { rifa_id } = req.params;
-    const usuario = req.user;
+// Obtener rifas públicas (solo activas)
+router.get('/publicas', rifasController.listarRifas);
 
-    if (usuario.rol === 'admin_global') {
-      return next(); // Admin global tiene acceso a todo
-    }
-
-    // Verificar si el usuario tiene relación con la rifa
-    const [relacion] = await db.execute(`
-      SELECT r.institucion_promotora_id, rp.institucion_id, rp.estado_participacion
-      FROM rifas r
-      LEFT JOIN rifa_participaciones rp ON r.id = rp.rifa_id AND rp.institucion_id = ?
-      WHERE r.id = ?
-    `, [usuario.institucion_id, rifa_id]);
-
-    if (!relacion.length) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Rifa no encontrada'
-      });
-    }
-
-    const esPromotora = relacion[0].institucion_promotora_id === usuario.institucion_id;
-    const esParticipante = relacion[0].institucion_id === usuario.institucion_id && 
-                          relacion[0].estado_participacion === 'aprobada';
-
-    if (!esPromotora && !esParticipante) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'No tienes acceso a esta rifa'
-      });
-    }
-
-    req.esPromotora = esPromotora;
-    req.esParticipante = esParticipante;
-    next();
-
-  } catch (error) {
-    console.error('Error en verificarPermisoRifa:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
-  }
-};
-
-// =====================================================
-// RUTAS PRINCIPALES DE RIFAS
-// =====================================================
-
-// Crear nueva rifa
-router.post('/', 
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  rifasValidations.crearRifa,
-  rifasController.crearRifa
+// Obtener detalle de rifa pública
+router.get('/publicas/:id',
+  param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+  validarErrores,
+  rifasController.obtenerRifaPorId
 );
 
-// Listar rifas (con filtros según rol)
-router.get('/', 
+// ===================================================
+// RUTAS PROTEGIDAS (requieren autenticación)
+// ===================================================
+
+// Listar todas las rifas
+router.get('/',
   requireAuth,
   rifasController.listarRifas
 );
 
-// Obtener rifa específica
-router.get('/:id', 
+// Crear nueva rifa
+router.post('/',
   requireAuth,
-  rifasController.obtenerRifa
+  requireRole(['admin_global', 'admin_institucion']),
+  [
+    body('titulo')
+      .optional()
+      .isLength({ min: 3, max: 255 })
+      .withMessage('El título debe tener entre 3 y 255 caracteres'),
+    body('nombre')
+      .optional()
+      .isLength({ min: 3, max: 255 })
+      .withMessage('El nombre debe tener entre 3 y 255 caracteres'),
+    body('precio_numero')
+      .isFloat({ min: 0.01 })
+      .withMessage('El precio debe ser mayor a 0'),
+    body('total_numeros')
+      .optional()
+      .isInt({ min: 1, max: 100000 })
+      .withMessage('El total de números debe estar entre 1 y 100,000'),
+    body('cantidad_numeros')
+      .optional()
+      .isInt({ min: 1, max: 100000 })
+      .withMessage('La cantidad de números debe estar entre 1 y 100,000'),
+    validarErrores
+  ],
+  rifasController.crearRifa
 );
 
-// Actualizar rifa (solo promotora)
+// Obtener rifa por ID
+router.get('/:id',
+  requireAuth,
+  param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+  validarErrores,
+  rifasController.obtenerRifaPorId
+);
+
+// Actualizar rifa
 router.put('/:id',
   requireAuth,
   requireRole(['admin_global', 'admin_institucion']),
-  // Solo la institución promotora puede editar
-  rifasValidations.crearRifa,
+  [
+    param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+    body('titulo').optional().isLength({ min: 3, max: 255 }),
+    body('nombre').optional().isLength({ min: 3, max: 255 }),
+    body('precio_numero').optional().isFloat({ min: 0.01 }),
+    validarErrores
+  ],
   rifasController.actualizarRifa
 );
 
-// Activar/desactivar rifa
-router.patch('/:id/estado',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  body('estado').isIn(['borrador', 'activa', 'finalizada', 'cancelada']),
-  rifasController.cambiarEstadoRifa
-);
-
-// =====================================================
-// GESTIÓN DE PARTICIPACIONES
-// =====================================================
-
-// Solicitar participación en rifa
-router.post('/:rifa_id/participaciones',
-  requireAuth,
-  requireRole(['admin_institucion', 'vendedor']),
-  body('observaciones').optional().isString(),
-  rifasController.solicitarParticipacion
-);
-
-// Listar participaciones de una rifa
-router.get('/:rifa_id/participaciones',
-  requireAuth,
-  verificarPermisoRifa,
-  rifasController.listarParticipaciones
-);
-
-// Aprobar/rechazar participación (solo promotora)
-router.patch('/participaciones/:participacion_id',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  body('accion').isIn(['aprobar', 'rechazar']),
-  body('observaciones').optional().isString(),
-  rifasController.gestionarParticipacion
-);
-
-// Retirar participación
-router.delete('/participaciones/:participacion_id',
-  requireAuth,
-  rifasController.retirarParticipacion
-);
-
-// =====================================================
+// ===================================================
 // GESTIÓN DE NÚMEROS
-// =====================================================
+// ===================================================
 
 // Generar números para una rifa
-router.post('/:rifa_id/generar-numeros',
+router.post('/:id/generar-numeros',
   requireAuth,
   requireRole(['admin_global', 'admin_institucion']),
-  verificarPermisoRifa,
+  param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+  validarErrores,
   rifasController.generarNumeros
 );
 
-// Asignar bloque de números a institución
-router.post('/:rifa_id/asignar-numeros-institucion',
+// Obtener números de una rifa
+router.get('/:id/numeros',
   requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  body('participacion_id').isInt(),
-  body('numero_desde').isInt({ min: 1 }),
-  body('numero_hasta').isInt({ min: 1 }),
-  rifasController.asignarNumerosInstitucion
+  param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+  validarErrores,
+  rifasController.obtenerNumeros
 );
 
-// Asignar números a vendedor
-router.post('/:rifa_id/asignar-numeros-vendedor',
+// ===================================================
+// SISTEMA DE VENTAS
+// ===================================================
+
+// Comprar números
+router.post('/:id/comprar',
   requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  body('vendedor_id').isInt(),
-  body('numero_desde').isInt({ min: 1 }),
-  body('numero_hasta').isInt({ min: 1 }),
-  rifasController.asignarNumerosVendedor
+  [
+    param('id').isInt({ min: 1 }).withMessage('ID de rifa inválido'),
+    body('numeros')
+      .isArray({ min: 1, max: 50 })
+      .withMessage('Debe especificar entre 1 y 50 números'),
+    body('numeros.*')
+      .isInt({ min: 1 })
+      .withMessage('Los números deben ser enteros positivos'),
+    validarErrores
+  ],
+  rifasController.comprarNumeros
 );
 
-// Liberar asignación de números
-router.delete('/:rifa_id/asignaciones/:asignacion_id',
+// Obtener mis números comprados
+router.get('/:id/mis-numeros',
   requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  rifasController.liberarAsignacion
-);
+  param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+  validarErrores,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const usuario = req.user;
 
-// =====================================================
-// GESTIÓN DE VENTAS
-// =====================================================
+      res.json({
+        status: 'success',
+        message: 'Endpoint mis números funcionando',
+        data: [],
+        info: 'Tabla rifas aún no migrada. Ejecutar script de migración SQL.'
+      });
 
-// Vender número específico
-router.post('/:rifa_id/numeros/:numero/vender',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion', 'vendedor']),
-  rifasValidations.venderNumero,
-  rifasController.venderNumero
-);
-
-// Reservar número
-router.post('/:rifa_id/numeros/:numero/reservar',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion', 'vendedor']),
-  body('comprador_nombre').notEmpty(),
-  body('tiempo_reserva').optional().isInt({ min: 1, max: 24 }),
-  rifasController.reservarNumero
-);
-
-// Cancelar venta
-router.delete('/:rifa_id/numeros/:numero/venta',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  body('motivo').notEmpty(),
-  rifasController.cancelarVenta
-);
-
-// Obtener números de un vendedor
-router.get('/:rifa_id/vendedor/numeros',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion', 'vendedor']),
-  rifasController.obtenerNumerosVendedor
-);
-
-// Obtener números disponibles para una institución
-router.get('/:rifa_id/instituciones/:institucion_id/numeros',
-  requireAuth,
-  verificarPermisoRifa,
-  rifasController.obtenerNumerosInstitucion
-);
-
-// =====================================================
-// REPORTES Y ESTADÍSTICAS
-// =====================================================
-
-// Estadísticas generales de la rifa
-router.get('/:rifa_id/estadisticas',
-  requireAuth,
-  verificarPermisoRifa,
-  rifasController.estadisticasRifa
-);
-
-// Reporte de ventas por institución
-router.get('/:rifa_id/reporte-instituciones',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  verificarPermisoRifa,
-  rifasController.reporteVentasInstitucion
-);
-
-// Reporte de ventas por vendedor
-router.get('/:rifa_id/reporte-vendedores',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  rifasController.reporteVentasVendedores
-);
-
-// Reporte de comisiones
-router.get('/:rifa_id/comisiones',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  verificarPermisoRifa,
-  rifasController.reporteComisiones
-);
-
-// Exportar datos de rifa (CSV/Excel)
-router.get('/:rifa_id/exportar',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  verificarPermisoRifa,
-  rifasController.exportarDatos
-);
-
-// =====================================================
-// GESTIÓN DE SORTEOS
-// =====================================================
-
-// Crear sorteo
-router.post('/:rifa_id/sorteos',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  body('nombre').notEmpty(),
-  body('fecha_sorteo').isISO8601(),
-  body('metodo_sorteo').isIn(['manual', 'aleatorio', 'loteria_nacional']),
-  rifasController.crearSorteo
-);
-
-// Ejecutar sorteo
-router.post('/:rifa_id/sorteos/:sorteo_id/ejecutar',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  rifasController.ejecutarSorteo
-);
-
-// =====================================================
-// RUTAS ESPECÍFICAS PARA VENDEDORES
-// =====================================================
-
-// Dashboard del vendedor
-router.get('/vendedor/dashboard',
-  requireAuth,
-  requireRole(['vendedor']),
-  rifasController.dashboardVendedor
-);
-
-// Rifas asignadas al vendedor
-router.get('/vendedor/mis-rifas',
-  requireAuth,
-  requireRole(['vendedor']),
-  rifasController.rifasVendedor
-);
-
-// Historial de ventas del vendedor
-router.get('/vendedor/mis-ventas',
-  requireAuth,
-  requireRole(['vendedor']),
-  rifasController.ventasVendedor
-);
-
-// =====================================================
-// RUTAS PÚBLICAS (SIN AUTENTICACIÓN)
-// =====================================================
-
-// Ver rifa pública (para compradores)
-router.get('/publico/:id',
-  rifasController.obtenerRifaPublica
-);
-
-// Verificar número vendido (QR)
-router.get('/publico/:rifa_id/numero/:numero/verificar',
-  rifasController.verificarNumero
-);
-
-// =====================================================
-// MIDDLEWARES DE VALIDACIÓN ADICIONALES
-// =====================================================
-
-// Validar que el número existe y pertenece a la rifa
-const validarNumeroRifa = async (req, res, next) => {
-  try {
-    const { rifa_id, numero } = req.params;
-    
-    const [numeroData] = await db.execute(
-      'SELECT id FROM numeros WHERE rifa_id = ? AND numero = ?',
-      [rifa_id, numero]
-    );
-
-    if (!numeroData.length) {
-      return res.status(404).json({
+    } catch (error) {
+      console.error('Error al obtener mis números:', error);
+      res.status(500).json({
         status: 'error',
-        message: 'Número no encontrado en esta rifa'
+        message: 'Error interno del servidor'
       });
     }
-
-    next();
-  } catch (error) {
-    console.error('Error validando número:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
   }
-};
+);
 
-// Aplicar validación a rutas que manejan números específicos
-router.use('/:rifa_id/numeros/:numero/*', validarNumeroRifa);
+// ===================================================
+// SORTEOS
+// ===================================================
+
+// Realizar sorteo
+router.post('/:id/sorteo',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+  validarErrores,
+  rifasController.realizarSorteo
+);
+
+// ===================================================
+// ESTADÍSTICAS
+// ===================================================
+
+// Estadísticas de una rifa
+router.get('/:id/estadisticas',
+  requireAuth,
+  param('id').isInt({ min: 1 }).withMessage('ID inválido'),
+  validarErrores,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      res.json({
+        status: 'success',
+        message: 'Endpoint estadísticas funcionando',
+        data: {
+          resumen: {
+            total_numeros: 100,
+            disponibles: 80,
+            vendidos: 20,
+            recaudado: 20000,
+            total_compradores: 5
+          }
+        },
+        info: 'Tabla rifas aún no migrada. Ejecutar script de migración SQL.'
+      });
+
+    } catch (error) {
+      console.error('Error al obtener estadísticas:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error interno del servidor'
+      });
+    }
+  }
+);
 
 export default router;
