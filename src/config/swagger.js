@@ -1,415 +1,958 @@
 // =====================================================
-// CONFIGURACIÓN COMPLETA DE SWAGGER CON SOPORTE DE PRODUCCIÓN
+// CONFIGURACIÓN SWAGGER COMPLETA Y CORREGIDA
 // src/config/swagger.js
 // =====================================================
 
-import swaggerJSDoc from 'swagger-jsdoc';
+import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
-// Detección automática de entorno
-const isProduction = process.env.NODE_ENV === 'production' || 
-                     process.env.DOMAIN === 'apirifas.huelemu.com.ar' ||
-                     process.env.HOST === 'apirifas.huelemu.com.ar' ||
-                     process.env.HOSTING === 'huelemu';
-
-const API_URL = isProduction ? 'https://apirifas.huelemu.com.ar' : `http://localhost:${process.env.PORT || 3100}`;
-const FRONTEND_URL = isProduction ? 'https://rifas.huelemu.com.ar' : 'http://localhost:4200';
-
-const swaggerDefinition = {
-  openapi: '3.0.0',
-  info: {
-    title: 'Rifas Solidarias API',
-    version: '2.0.0',
-    description: `
-# API para Sistema de Rifas Solidarias Multi-Institución
-
-Esta API permite gestionar un sistema completo de rifas solidarias donde múltiples instituciones pueden:
-- Crear y gestionar rifas
-- Participar en rifas de otras instituciones
-- Vender números de rifa
-- Gestionar usuarios y roles
-- Obtener reportes y estadísticas
-
-## Entorno actual:
-- **Modo**: ${isProduction ? 'PRODUCCIÓN' : 'DESARROLLO'}
-- **API URL**: ${API_URL}
-- **Frontend URL**: ${FRONTEND_URL}
-
-## Características principales:
-- 🔐 **Autenticación JWT** con refresh tokens
-- 👥 **Sistema de roles** (admin_global, admin_institucion, vendedor, comprador)
-- 🏢 **Multi-institución** (cada institución puede gestionar sus propias rifas)
-- 🎫 **Gestión de rifas** completa con números, sorteos y comisiones
-- 📊 **Reportes y estadísticas** detalladas
-- 🔧 **Endpoints de debugging** para desarrollo
-
-## Roles del sistema:
-- **admin_global**: Acceso completo al sistema
-- **admin_institucion**: Gestión completa de su institución
-- **vendedor**: Venta de números de rifa
-- **comprador**: Compra de números y participación en rifas
-
-## Flujo típico:
-1. Registro/Login de usuario
-2. Creación de rifa por institución promotora
-3. Participación de otras instituciones
-4. Asignación de números a vendedores
-5. Venta de números a compradores
-6. Sorteo y determinación de ganador
-7. Cálculo y distribución de comisiones
-    `,
-    contact: {
-      name: 'Soporte Técnico - Rifas Solidarias',
-      email: 'soporte@rifas-solidarias.com',
-      url: isProduction ? 'https://rifas.huelemu.com.ar/soporte' : 'http://localhost:4200/soporte'
-    },
-    license: {
-      name: 'MIT',
-      url: 'https://opensource.org/licenses/MIT'
-    }
-  },
-  servers: isProduction ? [
-    {
-      url: 'https://apirifas.huelemu.com.ar',
-      description: '🚀 Servidor de producción (Huelemu)'
-    },
-    {
-      url: 'http://localhost:3100',
-      description: '🔧 Servidor de desarrollo local'
-    }
-  ] : [
-    {
-      url: 'http://localhost:3100',
-      description: '🔧 Servidor de desarrollo local'
-    },
-    {
-      url: 'https://apirifas.huelemu.com.ar',
-      description: '🚀 Servidor de producción (Huelemu)'
-    }
-  ],
-  components: {
-    securitySchemes: {
-      bearerAuth: {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Ingresa tu token JWT en el formato: Bearer {token}'
-      }
-    },
-    parameters: {
-      PageParam: {
-        name: 'page',
-        in: 'query',
-        description: 'Número de página para paginación',
-        required: false,
-        schema: {
-          type: 'integer',
-          minimum: 1,
-          default: 1
-        }
-      },
-      LimitParam: {
-        name: 'limit',
-        in: 'query',
-        description: 'Cantidad de elementos por página',
-        required: false,
-        schema: {
-          type: 'integer',
-          minimum: 1,
-          maximum: 100,
-          default: 20
-        }
-      }
-    },
-    responses: {
-      Success: {
-        description: 'Operación exitosa',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                status: {
-                  type: 'string',
-                  example: 'success'
-                },
-                message: {
-                  type: 'string',
-                  example: 'Operación completada exitosamente'
-                },
-                data: {
-                  type: 'object'
-                },
-                timestamp: {
-                  type: 'string',
-                  format: 'date-time'
-                }
-              }
-            }
-          }
-        }
-      },
-      Unauthorized: {
-        description: 'No autenticado - Token requerido o inválido',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                status: {
-                  type: 'string',
-                  example: 'error'
-                },
-                message: {
-                  type: 'string',
-                  example: 'Token de acceso requerido'
-                },
-                code: {
-                  type: 'string',
-                  example: 'MISSING_TOKEN'
-                }
-              }
-            }
-          }
-        }
-      },
-      Forbidden: {
-        description: 'Acceso denegado - Permisos insuficientes',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                status: {
-                  type: 'string',
-                  example: 'error'
-                },
-                message: {
-                  type: 'string',
-                  example: 'No tienes permisos para realizar esta acción'
-                },
-                required_role: {
-                  type: 'string',
-                  example: 'admin_global'
-                }
-              }
-            }
-          }
-        }
-      },
-      NotFound: {
-        description: 'Recurso no encontrado',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                status: {
-                  type: 'string',
-                  example: 'error'
-                },
-                message: {
-                  type: 'string',
-                  example: 'Recurso no encontrado'
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
-  tags: [
-    {
-      name: 'Sistema',
-      description: '🔧 Endpoints de monitoreo y estado del sistema'
-    },
-    {
-      name: 'Autenticación',
-      description: '🔐 Gestión de autenticación y autorización'
-    },
-    {
-      name: 'Usuarios',
-      description: '👥 Gestión de usuarios del sistema'
-    },
-    {
-      name: 'Instituciones',
-      description: '🏢 Gestión de instituciones y organizaciones'
-    },
-    {
-      name: 'Rifas',
-      description: '🎫 Gestión de rifas y sorteos (próximamente)'
-    },
-    {
-      name: 'Debug',
-      description: '🐛 Endpoints de debugging (solo desarrollo)',
-      externalDocs: {
-        description: 'Solo disponible en modo desarrollo',
-        url: isProduction ? '#' : `${API_URL}/debug/usuarios`
-      }
-    }
-  ]
-};
-
 const options = {
-  definition: swaggerDefinition,
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'API Rifas Solidarias',
+      version: '2.0.0',
+      description: `
+        API completa para el sistema de rifas solidarias multi-institución.
+        
+        **Características principales:**
+        - 🔐 Autenticación JWT con roles
+        - 🏢 Gestión multi-institución
+        - 🎪 Sistema completo de rifas
+        - 💰 Gestión de ventas y números
+        - 📊 Reportes y estadísticas
+        
+        **Para comenzar:**
+        1. Regístrate con POST /auth/register
+        2. Inicia sesión con POST /auth/login
+        3. Usa el token en el botón "Authorize" arriba
+      `,
+      contact: {
+        name: 'Soporte Técnico Huelemu',
+        email: 'juan.lacy@huelemu.com.ar',
+        url: 'https://huelemu.com.ar'
+      },
+      license: {
+        name: 'MIT',
+        url: 'https://opensource.org/licenses/MIT'
+      }
+    },
+    servers: [
+      {
+        url: 'http://localhost:3100',
+        description: 'Servidor de desarrollo local'
+      },
+      {
+        url: 'https://apirifas.huelemu.com.ar',
+        description: 'Servidor de producción'
+      }
+    ],
+    
+    // =====================================================
+    // PATHS MANUALES PARA RIFAS
+    // =====================================================
+    paths: {
+      '/rifas/test/health': {
+        get: {
+          tags: ['Sistema'],
+          summary: 'Health check del módulo de rifas',
+          responses: {
+            200: {
+              description: 'Módulo funcionando correctamente',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      status: { type: 'string', example: 'success' },
+                      message: { type: 'string', example: 'Módulo de rifas funcionando correctamente' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      '/rifas/publicas': {
+        get: {
+          tags: ['Rifas Públicas'],
+          summary: 'Listar rifas públicas activas',
+          parameters: [
+            {
+              in: 'query',
+              name: 'page',
+              schema: { type: 'integer', default: 1 },
+              description: 'Número de página'
+            },
+            {
+              in: 'query',
+              name: 'limit',
+              schema: { type: 'integer', default: 10 },
+              description: 'Elementos por página'
+            }
+          ],
+          responses: {
+            200: {
+              description: 'Lista de rifas activas',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/ApiResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: {
+                            type: 'array',
+                            items: { $ref: '#/components/schemas/Rifa' }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      '/rifas/publicas/{id}': {
+        get: {
+          tags: ['Rifas Públicas'],
+          summary: 'Ver detalles de rifa pública',
+          parameters: [
+            {
+              in: 'path',
+              name: 'id',
+              required: true,
+              schema: { type: 'integer' },
+              description: 'ID de la rifa'
+            }
+          ],
+          responses: {
+            200: {
+              description: 'Detalles de la rifa',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/ApiResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: { $ref: '#/components/schemas/Rifa' }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            404: { $ref: '#/components/responses/NotFoundError' }
+          }
+        }
+      },
+      '/rifas/publicas/{id}/numeros': {
+        get: {
+          tags: ['Números'],
+          summary: 'Ver números disponibles de rifa pública',
+          parameters: [
+            {
+              in: 'path',
+              name: 'id',
+              required: true,
+              schema: { type: 'integer' },
+              description: 'ID de la rifa'
+            },
+            {
+              in: 'query',
+              name: 'estado',
+              schema: { type: 'string', enum: ['disponible', 'vendido', 'reservado'] },
+              description: 'Filtrar por estado del número'
+            }
+          ],
+          responses: {
+            200: {
+              description: 'Lista de números de la rifa',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/ApiResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: {
+                            type: 'array',
+                            items: { $ref: '#/components/schemas/NumeroRifa' }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      '/rifas': {
+        get: {
+          tags: ['Rifas'],
+          summary: 'Listar rifas (requiere autenticación)',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              in: 'query',
+              name: 'estado',
+              schema: { type: 'string', enum: ['borrador', 'activa', 'cerrada', 'finalizada', 'cancelada'] },
+              description: 'Filtrar por estado'
+            },
+            {
+              in: 'query',
+              name: 'page',
+              schema: { type: 'integer', default: 1 }
+            }
+          ],
+          responses: {
+            200: {
+              description: 'Lista de rifas',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/ApiResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: {
+                            type: 'array',
+                            items: { $ref: '#/components/schemas/Rifa' }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            401: { $ref: '#/components/responses/UnauthorizedError' }
+          }
+        },
+        post: {
+          tags: ['Rifas'],
+          summary: 'Crear nueva rifa (solo admins)',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CrearRifaRequest' }
+              }
+            }
+          },
+          responses: {
+            201: {
+              description: 'Rifa creada exitosamente',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/ApiResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: { $ref: '#/components/schemas/Rifa' }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            400: { $ref: '#/components/responses/ValidationError' },
+            401: { $ref: '#/components/responses/UnauthorizedError' },
+            403: { $ref: '#/components/responses/ForbiddenError' }
+          }
+        }
+      },
+      '/rifas/{id}': {
+        get: {
+          tags: ['Rifas'],
+          summary: 'Obtener detalles de una rifa',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              in: 'path',
+              name: 'id',
+              required: true,
+              schema: { type: 'integer' },
+              description: 'ID de la rifa'
+            }
+          ],
+          responses: {
+            200: {
+              description: 'Detalles de la rifa',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/ApiResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: { $ref: '#/components/schemas/Rifa' }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            401: { $ref: '#/components/responses/UnauthorizedError' },
+            404: { $ref: '#/components/responses/NotFoundError' }
+          }
+        },
+        put: {
+          tags: ['Rifas'],
+          summary: 'Actualizar rifa (solo admins)',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              in: 'path',
+              name: 'id',
+              required: true,
+              schema: { type: 'integer' }
+            }
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    nombre: { type: 'string' },
+                    descripcion: { type: 'string' },
+                    estado: { type: 'string', enum: ['borrador', 'activa', 'cerrada', 'finalizada', 'cancelada'] }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            200: {
+              description: 'Rifa actualizada exitosamente',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ApiResponse' }
+                }
+              }
+            },
+            401: { $ref: '#/components/responses/UnauthorizedError' },
+            403: { $ref: '#/components/responses/ForbiddenError' }
+          }
+        }
+      },
+      '/rifas/{id}/numeros': {
+        get: {
+          tags: ['Números'],
+          summary: 'Obtener números de una rifa',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              in: 'path',
+              name: 'id',
+              required: true,
+              schema: { type: 'integer' }
+            },
+            {
+              in: 'query',
+              name: 'estado',
+              schema: { type: 'string', enum: ['disponible', 'vendido', 'reservado'] }
+            }
+          ],
+          responses: {
+            200: {
+              description: 'Lista de números de la rifa',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/ApiResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: {
+                            type: 'array',
+                            items: { $ref: '#/components/schemas/NumeroRifa' }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            401: { $ref: '#/components/responses/UnauthorizedError' }
+          }
+        }
+      },
+      '/rifas/{rifa_id}/estadisticas': {
+        get: {
+          tags: ['Rifas'],
+          summary: 'Obtener estadísticas de la rifa',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              in: 'path',
+              name: 'rifa_id',
+              required: true,
+              schema: { type: 'integer' }
+            }
+          ],
+          responses: {
+            200: {
+              description: 'Estadísticas de la rifa',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      status: { type: 'string' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'integer' },
+                          nombre: { type: 'string' },
+                          numeros_vendidos: { type: 'integer' },
+                          recaudado: { type: 'number' },
+                          porcentaje_vendido: { type: 'number' }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            401: { $ref: '#/components/responses/UnauthorizedError' }
+          }
+        }
+      }
+    },
+
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Ingresa tu access token JWT obtenido del login'
+        }
+      },
+      schemas: {
+        ApiResponse: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              enum: ['success', 'error'],
+              example: 'success'
+            },
+            message: {
+              type: 'string',
+              example: 'Operación exitosa'
+            },
+            data: {
+              type: 'object',
+              description: 'Datos de respuesta'
+            },
+            pagination: {
+              type: 'object',
+              properties: {
+                current_page: { type: 'integer', example: 1 },
+                total_pages: { type: 'integer', example: 5 },
+                total_items: { type: 'integer', example: 47 },
+                items_per_page: { type: 'integer', example: 10 }
+              }
+            }
+          }
+        },
+        
+        Error: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              enum: ['error'],
+              example: 'error'
+            },
+            message: {
+              type: 'string',
+              example: 'Descripción del error'
+            },
+            code: {
+              type: 'string',
+              example: 'ERROR_CODE'
+            },
+            errors: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  field: { type: 'string' },
+                  message: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+
+        LoginRequest: {
+          type: 'object',
+          required: ['email', 'password'],
+          properties: {
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'admin@test.com'
+            },
+            password: {
+              type: 'string',
+              minLength: 6,
+              example: 'test123'
+            }
+          }
+        },
+
+        RegisterRequest: {
+          type: 'object',
+          required: ['nombre', 'apellido', 'email', 'password'],
+          properties: {
+            nombre: {
+              type: 'string',
+              example: 'Juan'
+            },
+            apellido: {
+              type: 'string',
+              example: 'Pérez'
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'juan.perez@email.com'
+            },
+            password: {
+              type: 'string',
+              minLength: 6,
+              example: 'password123'
+            },
+            telefono: {
+              type: 'string',
+              example: '+541234567890'
+            },
+            rol: {
+              type: 'string',
+              enum: ['admin_global', 'admin_institucion', 'vendedor', 'comprador'],
+              default: 'comprador'
+            },
+            institucion_id: {
+              type: 'integer',
+              example: 1
+            }
+          }
+        },
+
+        Usuario: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'integer',
+              example: 1
+            },
+            nombre: {
+              type: 'string',
+              example: 'Juan'
+            },
+            apellido: {
+              type: 'string',
+              example: 'Pérez'
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'juan.perez@email.com'
+            },
+            telefono: {
+              type: 'string',
+              example: '+541234567890'
+            },
+            rol: {
+              type: 'string',
+              enum: ['admin_global', 'admin_institucion', 'vendedor', 'comprador'],
+              example: 'vendedor'
+            },
+            estado: {
+              type: 'string',
+              enum: ['activo', 'inactivo', 'bloqueado'],
+              example: 'activo'
+            },
+            institucion_id: {
+              type: 'integer',
+              example: 1
+            },
+            institucion_nombre: {
+              type: 'string',
+              example: 'Fundación Ejemplo'
+            },
+            fecha_creacion: {
+              type: 'string',
+              format: 'date-time'
+            }
+          }
+        },
+
+        Institucion: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'integer',
+              example: 1
+            },
+            nombre: {
+              type: 'string',
+              example: 'Fundación Ejemplo'
+            },
+            descripcion: {
+              type: 'string',
+              example: 'Descripción de la institución'
+            },
+            direccion: {
+              type: 'string',
+              example: 'Av. Ejemplo 123, Buenos Aires'
+            },
+            telefono: {
+              type: 'string',
+              example: '+541134567890'
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'contacto@fundacion.org'
+            },
+            estado: {
+              type: 'string',
+              enum: ['activa', 'inactiva'],
+              example: 'activa'
+            },
+            fecha_creacion: {
+              type: 'string',
+              format: 'date-time'
+            }
+          }
+        },
+
+        Rifa: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'integer',
+              example: 1
+            },
+            nombre: {
+              type: 'string',
+              example: 'Rifa Solidaria Ejemplo'
+            },
+            descripcion: {
+              type: 'string',
+              example: 'Descripción de la rifa solidaria'
+            },
+            cantidad_numeros: {
+              type: 'integer',
+              minimum: 10,
+              example: 1000
+            },
+            precio_numero: {
+              type: 'number',
+              minimum: 0.01,
+              example: 50.00
+            },
+            fecha_inicio: {
+              type: 'string',
+              format: 'date-time'
+            },
+            fecha_fin: {
+              type: 'string',
+              format: 'date-time'
+            },
+            fecha_sorteo: {
+              type: 'string',
+              format: 'date-time'
+            },
+            estado: {
+              type: 'string',
+              enum: ['borrador', 'activa', 'cerrada', 'finalizada', 'cancelada'],
+              example: 'activa'
+            },
+            institucion_promotora_id: {
+              type: 'integer',
+              example: 1
+            },
+            institucion_nombre: {
+              type: 'string',
+              example: 'Fundación Ejemplo'
+            },
+            creado_por: {
+              type: 'integer',
+              example: 1
+            },
+            numeros_vendidos: {
+              type: 'integer',
+              example: 150
+            },
+            numeros_disponibles: {
+              type: 'integer',
+              example: 850
+            },
+            recaudado: {
+              type: 'number',
+              example: 7500.00
+            },
+            porcentaje_vendido: {
+              type: 'number',
+              example: 15.0
+            }
+          }
+        },
+
+        CrearRifaRequest: {
+          type: 'object',
+          required: ['nombre', 'cantidad_numeros', 'precio_numero', 'fecha_inicio', 'fecha_fin', 'fecha_sorteo'],
+          properties: {
+            nombre: {
+              type: 'string',
+              minLength: 3,
+              maxLength: 100,
+              example: 'Rifa Solidaria 2025'
+            },
+            descripcion: {
+              type: 'string',
+              maxLength: 500,
+              example: 'Rifa para recaudar fondos para...'
+            },
+            cantidad_numeros: {
+              type: 'integer',
+              minimum: 10,
+              maximum: 10000,
+              example: 1000
+            },
+            precio_numero: {
+              type: 'number',
+              minimum: 0.01,
+              example: 50.00
+            },
+            fecha_inicio: {
+              type: 'string',
+              format: 'date-time',
+              example: '2025-01-01T00:00:00Z'
+            },
+            fecha_fin: {
+              type: 'string',
+              format: 'date-time',
+              example: '2025-01-31T23:59:59Z'
+            },
+            fecha_sorteo: {
+              type: 'string',
+              format: 'date-time',
+              example: '2025-02-01T20:00:00Z'
+            },
+            institucion_promotora_id: {
+              type: 'integer',
+              example: 1
+            }
+          }
+        },
+
+        NumeroRifa: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'integer',
+              example: 1
+            },
+            rifa_id: {
+              type: 'integer',
+              example: 1
+            },
+            numero: {
+              type: 'integer',
+              example: 123
+            },
+            estado: {
+              type: 'string',
+              enum: ['disponible', 'reservado', 'vendido'],
+              example: 'disponible'
+            },
+            comprador_nombre: {
+              type: 'string',
+              example: 'María González'
+            },
+            fecha_venta: {
+              type: 'string',
+              format: 'date-time'
+            }
+          }
+        }
+      },
+
+      responses: {
+        UnauthorizedError: {
+          description: 'Token de acceso requerido o inválido',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              },
+              example: {
+                status: 'error',
+                message: 'Token de acceso requerido',
+                code: 'UNAUTHORIZED'
+              }
+            }
+          }
+        },
+        
+        ForbiddenError: {
+          description: 'Sin permisos suficientes',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              },
+              example: {
+                status: 'error',
+                message: 'No tienes permisos para realizar esta acción',
+                code: 'FORBIDDEN'
+              }
+            }
+          }
+        },
+        
+        NotFoundError: {
+          description: 'Recurso no encontrado',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              },
+              example: {
+                status: 'error',
+                message: 'Recurso no encontrado',
+                code: 'NOT_FOUND'
+              }
+            }
+          }
+        },
+        
+        ValidationError: {
+          description: 'Error de validación de datos',
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/Error'
+              },
+              example: {
+                status: 'error',
+                message: 'Datos inválidos',
+                errors: [
+                  {
+                    field: 'email',
+                    message: 'Formato de email inválido'
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    
+    tags: [
+      {
+        name: 'Sistema',
+        description: 'Endpoints de health check y testing'
+      },
+      {
+        name: 'Autenticación',
+        description: 'Registro, login y gestión de tokens JWT'
+      },
+      {
+        name: 'Usuarios',
+        description: 'Gestión de usuarios del sistema'
+      },
+      {
+        name: 'Instituciones',
+        description: 'Gestión de instituciones participantes'
+      },
+      {
+        name: 'Rifas',
+        description: 'Gestión completa de rifas y sorteos'
+      },
+      {
+        name: 'Rifas Públicas',
+        description: 'Endpoints públicos para rifas activas'
+      },
+      {
+        name: 'Números',
+        description: 'Gestión de números de rifas'
+      }
+    ]
+  },
   apis: [
     './src/routes/*.js',
+    './src/controllers/*.js',
     './index.js'
   ]
 };
 
+const specs = swaggerJsdoc(options);
+
 export const setupSwagger = (app) => {
-  try {
-    const specs = swaggerJSDoc(options);
-    
-    // Configuración personalizada de Swagger UI
-    const swaggerOptions = {
-      explorer: true,
-      swaggerOptions: {
-        persistAuthorization: true,
-        filter: true,
-        tryItOutEnabled: true,
-        requestSnippetsEnabled: true,
-        defaultModelsExpandDepth: 2,
-        defaultModelExpandDepth: 2,
-        docExpansion: 'list',
-        operationsSorter: 'alpha',
-        tagsSorter: 'alpha',
-        url: `${API_URL}/api-docs.json`
-      },
-      customCss: `
-        .swagger-ui .topbar { 
-          background-color: #2c3e50; 
-          border-bottom: 3px solid #3498db;
-        }
-        .swagger-ui .topbar .download-url-wrapper { 
-          display: none; 
-        }
-        .swagger-ui .info .title {
-          color: #2c3e50;
-        }
-        .swagger-ui .scheme-container {
-          background: ${isProduction ? '#e8f5e8' : '#f8f9fa'};
-          border: 1px solid ${isProduction ? '#28a745' : '#dee2e6'};
-          border-radius: 0.375rem;
-          padding: 1rem;
-          margin: 1rem 0;
-        }
-        .swagger-ui .info .description::before {
-          content: "${isProduction ? '🚀 PRODUCCIÓN' : '🔧 DESARROLLO'}";
-          display: block;
-          font-weight: bold;
-          color: ${isProduction ? '#28a745' : '#007bff'};
-          margin-bottom: 1rem;
-          padding: 0.5rem;
-          background: ${isProduction ? '#d4edda' : '#e7f3ff'};
-          border-radius: 0.25rem;
-          text-align: center;
-        }
-      `,
-      customSiteTitle: `Rifas Solidarias API - ${isProduction ? 'Producción' : 'Desarrollo'}`,
-      customfavIcon: '/favicon.ico'
-    };
-    
-    // Configurar Swagger UI
-    app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, swaggerOptions));
-    
-    // Endpoint para obtener el JSON de la documentación
-    app.get('/api-docs.json', (req, res) => {
-      res.setHeader('Content-Type', 'application/json');
-      res.send(specs);
-    });
-    
-    // Endpoint para información de la API
-    app.get('/api-info', (req, res) => {
-      res.json({
-        name: specs.info.title,
-        version: specs.info.version,
-        description: 'API para sistema de rifas solidarias',
-        environment: isProduction ? 'production' : 'development',
-        api_url: API_URL,
-        frontend_url: FRONTEND_URL,
-        documentation: `${API_URL}/api-docs`,
-        health: `${API_URL}/health`,
-        total_endpoints: Object.keys(specs.paths || {}).length,
-        total_tags: specs.tags ? specs.tags.length : 0,
-        servers: specs.servers,
-        contact: specs.info.contact,
-        timestamp: new Date().toISOString()
-      });
-    });
-    
-    console.log(`📚 Swagger configurado en ${API_URL}/api-docs`);
-    console.log(`📊 Entorno: ${isProduction ? 'PRODUCCIÓN' : 'DESARROLLO'}`);
-    
-  } catch (error) {
-    console.error('⚠️ Error configurando Swagger:', error.message);
-    
-    // Página de fallback con URLs dinámicas
-    app.get('/api-docs', (req, res) => {
-      res.send(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Rifas Solidarias API - ${isProduction ? 'Producción' : 'Desarrollo'}</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-              body { 
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                margin: 0;
-                padding: 40px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-              }
-              .container { 
-                max-width: 900px; 
-                margin: 0 auto; 
-                background: white; 
-                padding: 40px; 
-                border-radius: 12px; 
-                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-              }
-              .badge {
-                display: inline-block;
-                padding: 6px 12px;
-                border-radius: 20px;
-                font-size: 0.8em;
-                font-weight: bold;
-                margin-bottom: 10px;
-                ${isProduction ? 
-                  'background: #d4edda; color: #155724; border: 1px solid #c3e6cb;' : 
-                  'background: #cce5ff; color: #004085; border: 1px solid #99d6ff;'
-                }
-              }
-              h1 { color: #2c3e50; }
-              .endpoint { 
-                background: #f1f2f6; 
-                padding: 12px; 
-                margin: 8px 0; 
-                border-radius: 6px; 
-                font-family: monospace;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="badge">${isProduction ? '🚀 PRODUCCIÓN' : '🔧 DESARROLLO'}</div>
-              <h1>🎫 Rifas Solidarias API</h1>
-              <p><strong>API URL:</strong> ${API_URL}</p>
-              <p><strong>Frontend:</strong> ${FRONTEND_URL}</p>
-              <p>Documentación completa temporalmente no disponible</p>
-              
-              <h2>Endpoints principales:</h2>
-              <div class="endpoint">GET ${API_URL}/health</div>
-              <div class="endpoint">POST ${API_URL}/auth/login</div>
-              <div class="endpoint">GET ${API_URL}/instituciones</div>
-              
-              <p>Contacto: <a href="mailto:soporte@rifas-solidarias.com">soporte@rifas-solidarias.com</a></p>
-            </div>
-          </body>
-        </html>
-      `);
-    });
-  }
+  const swaggerUiOptions = {
+    explorer: true,
+    customCss: `
+      .swagger-ui .topbar { display: none }
+      .swagger-ui .info .title { color: #2c3e50; font-size: 2.5em; }
+      .swagger-ui .info .description { font-size: 1.1em; line-height: 1.6; }
+      .swagger-ui .scheme-container { background: #f8f9fa; padding: 20px; border-radius: 8px; }
+      .swagger-ui .btn.authorize { background-color: #007bff; border-color: #007bff; }
+      .swagger-ui .btn.authorize:hover { background-color: #0056b3; }
+    `,
+    customSiteTitle: 'API Rifas Solidarias - Documentación',
+    swaggerOptions: {
+      persistAuthorization: true,
+      displayRequestDuration: true,
+      filter: true,
+      showExtensions: true,
+      showCommonExtensions: true,
+      docExpansion: 'none',
+      defaultModelsExpandDepth: 1,
+      defaultModelExpandDepth: 1,
+      tryItOutEnabled: true
+    }
+  };
+
+  app.get('/swagger.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(specs);
+  });
+
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, swaggerUiOptions));
+  
+  console.log('📚 Swagger configurado correctamente:');
+  console.log('   📖 Interfaz: http://localhost:3100/api-docs');
+  console.log('   📄 JSON: http://localhost:3100/swagger.json');
 };
+
+export default { setupSwagger, specs };

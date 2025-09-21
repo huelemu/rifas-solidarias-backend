@@ -1,475 +1,144 @@
 // =====================================================
-// SERVIDOR PRINCIPAL - RIFAS SOLIDARIAS BACKEND
-// index.js - CON SOPORTE COMPLETO PARA PRODUCCIÓN
+// INDEX.JS COMPLETO CON MÓDULO DE RIFAS
+// Servidor principal para Rifas Solidarias
 // =====================================================
 
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import db, { testConnection } from './src/config/db.js';
 import { setupSwagger } from './src/config/swagger.js';
-import { errorHandler } from './src/middleware/errorHandler.js';
+import db from './src/config/db.js';
 
-// Importar rutas existentes
+// Importar rutas
 import authRoutes from './src/routes/auth.js';
 import institucionRoutes from './src/routes/instituciones.js';
 import usuariosRoutes from './src/routes/usuarios.js';
+import rifasRoutes from './src/routes/rifas.js'; // ✅ NUEVA RUTA
 
-// =====================================================
-// CONFIGURACIÓN INICIAL
-// =====================================================
+// Importar middleware de autenticación
+import { requireAuth, optionalAuth } from './src/middleware/auth.js';
 
+// Configurar variables de entorno PRIMERO
 dotenv.config();
 
+// Crear la aplicación Express
 const app = express();
-const PORT = process.env.PORT || 3100;
 
-// Detección automática de entorno
-const isProduction = process.env.NODE_ENV === 'production' || 
-                     process.env.DOMAIN === 'apirifas.huelemu.com.ar' ||
-                     process.env.HOST === 'apirifas.huelemu.com.ar' ||
-                     process.env.HOSTING === 'huelemu';
-
-const SERVER_CONFIG = {
-  API_URL: isProduction ? 'https://apirifas.huelemu.com.ar' : `http://localhost:${PORT}`,
-  FRONTEND_URL: isProduction ? 'https://rifas.huelemu.com.ar' : 'http://localhost:4200',
-  ENVIRONMENT: isProduction ? 'production' : 'development'
-};
-
-console.log('\n🚀 =======================================');
-console.log('   🎯 RIFAS SOLIDARIAS - BACKEND API');
-console.log(`   🌍 Entorno: ${SERVER_CONFIG.ENVIRONMENT.toUpperCase()}`);
-console.log(`   🌐 API: ${SERVER_CONFIG.API_URL}`);
-console.log('🚀 =======================================\n');
+console.log('🔧 Iniciando servidor...');
+console.log('📦 Express app creada correctamente');
 
 // =====================================================
-// MIDDLEWARE GLOBAL
+// CONFIGURACIÓN CORS PARA DESARROLLO Y PRODUCCIÓN
 // =====================================================
 
-// CORS configurado dinámicamente
 const corsOptions = {
   origin: function (origin, callback) {
+    // Permitir requests sin origin (como apps móviles, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Lista de origins permitidos
     const allowedOrigins = [
-      'http://localhost:3000',    // React dev
-      'http://localhost:3001',    // React alt port
-      'http://localhost:4200',    // Angular dev
-      'http://localhost:5173',    // Vite dev
-      'https://rifas.huelemu.com.ar',  // Producción frontend
-      'https://apirifas.huelemu.com.ar', // API producción
-      SERVER_CONFIG.FRONTEND_URL,  // URL dinámica
-      process.env.FRONTEND_URL,   // URL de .env
-    ].filter(Boolean);
-
-    if (!origin || allowedOrigins.includes(origin)) {
+      // Desarrollo local
+      'http://localhost:3000',
+      'http://localhost:3001', 
+      'http://localhost:4200',  // Angular dev server
+      'http://localhost:5173',  // Vite
+      'http://localhost:8080',
+      'http://127.0.0.1:8080',
+      'http://localhost:8000',
+      'http://127.0.0.1:8000',
+      'http://localhost:3100', // Para Swagger
+      
+      // Producción (actualizar según tu dominio)
+      'https://rifas.huelemu.com.ar',
+      'http://rifas.huelemu.com.ar',
+      'https://apirifas.huelemu.com.ar',
+      'http://apirifas.huelemu.com.ar',
+      'https://www.rifas.huelemu.com.ar',
+      'http://www.rifas.huelemu.com.ar',
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      console.warn(`🚫 CORS: Origen rechazado: ${origin}`);
-      callback(new Error('No permitido por CORS'));
+      console.log('🚫 CORS blocked origin:', origin);
+      // En desarrollo, permitir todos los origins
+      callback(null, process.env.NODE_ENV === 'development');
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ]
 };
 
+// Aplicar CORS
 app.use(cors(corsOptions));
+console.log('🌐 CORS configurado correctamente');
+
+// Middleware adicional para manejar preflight requests
+app.options('*', cors(corsOptions));
+
+// Middleware para parsing de JSON
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Logger de requests (solo en desarrollo)
-if (!isProduction) {
-  app.use((req, res, next) => {
-    const timestamp = new Date().toISOString();
-    console.log(`📡 [${timestamp}] ${req.method} ${req.originalUrl} - ${req.ip}`);
-    next();
-  });
-}
-
-// =====================================================
-// VERIFICACIÓN DE SISTEMA
-// =====================================================
-
-// Health check endpoint con URLs dinámicas
-app.get('/', (req, res) => {
-  res.json({
-    status: 'OK',
-    service: 'Rifas Solidarias API',
-    version: '2.0.0',
-    environment: SERVER_CONFIG.ENVIRONMENT,
-    timestamp: new Date().toISOString(),
-    urls: {
-      api: SERVER_CONFIG.API_URL,
-      frontend: SERVER_CONFIG.FRONTEND_URL,
-      documentation: `${SERVER_CONFIG.API_URL}/api-docs`
-    },
-    endpoints: {
-      documentation: '/api-docs',
-      auth: '/auth',
-      institutions: '/instituciones',
-      users: '/usuarios',
-      ...(isProduction ? {} : { debug: '/debug/usuarios' })
-    }
-  });
-});
-
-// Test de conexión a base de datos
-app.get('/health', async (req, res) => {
-  try {
-    const dbConnected = await testConnection();
-    
-    res.json({
-      status: 'OK',
-      environment: SERVER_CONFIG.ENVIRONMENT,
-      api_url: SERVER_CONFIG.API_URL,
-      database: dbConnected ? 'Connected' : 'Disconnected',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      memory: process.memoryUsage()
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'ERROR',
-      environment: SERVER_CONFIG.ENVIRONMENT,
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// Test detallado de base de datos
-app.get('/test-db', async (req, res) => {
-  try {
-    console.log('🔍 Probando conexión a base de datos...');
-    
-    const [test] = await db.execute('SELECT 1 as conexion');
-    const [info] = await db.execute('SELECT DATABASE() as base, VERSION() as version');
-    const [tablas] = await db.execute('SHOW TABLES');
-    const [usuarios] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
-    const [instituciones] = await db.execute('SELECT COUNT(*) as total FROM instituciones');
-    
-    console.log('✅ Conexión a BD exitosa');
-    
-    res.json({
-      status: 'OK',
-      environment: SERVER_CONFIG.ENVIRONMENT,
-      api_url: SERVER_CONFIG.API_URL,
-      conexion: test[0].conexion,
-      base_datos: info[0].base,
-      version: info[0].version,
-      total_tablas: tablas.length,
-      total_usuarios: usuarios[0].total,
-      total_instituciones: instituciones[0].total,
-      tablas: tablas.map(table => Object.values(table)[0]),
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('❌ Error en test-db:', error);
-    res.status(500).json({
-      status: 'ERROR',
-      environment: SERVER_CONFIG.ENVIRONMENT,
-      error: error.message,
-      codigo: error.code
-    });
-  }
-});
-
-// Información del entorno
-app.get('/env-info', (req, res) => {
-  res.json({
-    environment: SERVER_CONFIG.ENVIRONMENT,
-    api_url: SERVER_CONFIG.API_URL,
-    frontend_url: SERVER_CONFIG.FRONTEND_URL,
-    version: '2.0.0',
-    node_version: process.version,
-    timestamp: new Date().toISOString(),
-    debug_available: !isProduction
-  });
+// Middleware para logging de requests
+app.use((req, res, next) => {
+  const origin = req.get('origin') || 'No origin';
+  const userAgent = req.get('user-agent') || 'No user-agent';
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${origin}`);
+  next();
 });
 
 // =====================================================
-// RUTAS PRINCIPALES
+// ENDPOINTS DE TESTING Y MONITOREO
 // =====================================================
-
-console.log('🛣️ Configurando rutas...');
-
-app.use('/auth', authRoutes);
-app.use('/instituciones', institucionRoutes);
-app.use('/usuarios', usuariosRoutes);
-
-console.log('✅ Rutas configuradas correctamente');
-
-// =====================================================
-// ENDPOINTS DE DEBUG (SOLO EN DESARROLLO)
-// =====================================================
-
-if (!isProduction) {
-  console.log('🐛 Configurando endpoints de debug...');
-
-  // Ver estado de usuarios
-  app.get('/debug/usuarios', async (req, res) => {
-    try {
-      console.log('🔍 Ejecutando diagnóstico de usuarios...');
-      
-      const [count] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
-      const [ultimos] = await db.execute(`
-        SELECT id, nombre, apellido, email, rol, fecha_creacion
-        FROM usuarios ORDER BY id DESC LIMIT 10
-      `);
-      
-      const [testUsers] = await db.execute(`
-        SELECT id, nombre, apellido, email, rol, fecha_creacion
-        FROM usuarios 
-        WHERE email LIKE '%test%' OR email LIKE '%debug%'
-        ORDER BY id DESC
-      `);
-      
-      console.log('✅ Consultas de diagnóstico ejecutadas');
-      
-      res.json({
-        status: 'success',
-        environment: 'development',
-        timestamp: new Date().toISOString(),
-        data: {
-          total_usuarios: count[0].total,
-          ultimos_usuarios: ultimos,
-          usuarios_test: testUsers
-        }
-      });
-      
-    } catch (error) {
-      console.error('❌ Error en diagnóstico:', error);
-      res.status(500).json({ 
-        status: 'error',
-        error: error.message
-      });
-    }
-  });
-
-  // Limpiar usuarios de prueba
-  app.delete('/debug/limpiar-test', async (req, res) => {
-    try {
-      console.log('🧹 Limpiando usuarios de prueba...');
-      
-      const [result] = await db.execute(`
-        DELETE FROM usuarios 
-        WHERE email LIKE '%test%' 
-        OR email LIKE '%debug%'
-        OR email LIKE '%ejemplo%'
-      `);
-      
-      console.log(`✅ Eliminados ${result.affectedRows} usuarios de prueba`);
-      
-      res.json({
-        status: 'success',
-        message: `${result.affectedRows} usuarios de prueba eliminados`,
-        affected_rows: result.affectedRows,
-        timestamp: new Date().toISOString()
-      });
-      
-    } catch (error) {
-      console.error('❌ Error limpiando:', error);
-      res.status(500).json({ 
-        status: 'error',
-        error: error.message 
-      });
-    }
-  });
-
-  // Test simple de conexión
-  app.get('/debug/test-connection', async (req, res) => {
-    try {
-      const [result] = await db.execute('SELECT 1 as test, NOW() as timestamp');
-      
-      res.json({
-        status: 'success',
-        message: 'Conexión a base de datos exitosa',
-        result: result[0]
-      });
-      
-    } catch (error) {
-      res.status(500).json({ 
-        status: 'error',
-        error: error.message 
-      });
-    }
-  });
-
-  // Registro simplificado para debug
-  app.post('/debug/register-simple', async (req, res) => {
-    console.log('\n🧪 ================================');
-    console.log('   REGISTRO SIMPLIFICADO - DEBUG');
-    console.log('🧪 ================================');
-    
-    try {
-      const { nombre, apellido, email, password, rol = 'comprador' } = req.body;
-      
-      console.log('📝 Datos recibidos:', { nombre, apellido, email, rol });
-
-      // Verificar email único
-      console.log('🔍 Verificando email único...');
-      const [existing] = await db.execute('SELECT id, email FROM usuarios WHERE email = ?', [email]);
-      
-      if (existing.length > 0) {
-        console.log('❌ Email ya existe:', existing[0]);
-        return res.status(409).json({
-          status: 'error',
-          message: 'Email ya existe',
-          debug: { existingUser: existing[0] }
-        });
-      }
-      console.log('✅ Email disponible');
-
-      // Hash de password
-      console.log('🔍 Encriptando password...');
-      const bcrypt = await import('bcrypt');
-      const hashedPassword = await bcrypt.default.hash(password, 10);
-      console.log('✅ Password encriptado');
-
-      // Contar usuarios antes
-      console.log('🔍 Contando usuarios ANTES del insert...');
-      const [beforeCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
-      console.log('📊 Usuarios antes:', beforeCount[0].total);
-
-      // INSERT con máximo detalle
-      console.log('🔍 Ejecutando INSERT...');
-      const insertSQL = `INSERT INTO usuarios (nombre, apellido, email, password, rol) VALUES (?, ?, ?, ?, ?)`;
-      const insertParams = [nombre, apellido, email, hashedPassword, rol];
-      
-      const [insertResult] = await db.execute(insertSQL, insertParams);
-      
-      console.log('✅ INSERT ejecutado:', {
-        insertId: insertResult.insertId,
-        affectedRows: insertResult.affectedRows
-      });
-
-      // Verificar que se insertó
-      console.log('🔍 Verificando inserción...');
-      const [afterCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
-      console.log('📊 Usuarios después:', afterCount[0].total);
-      
-      const usuariosCreados = afterCount[0].total - beforeCount[0].total;
-      console.log('📈 Usuarios creados:', usuariosCreados);
-
-      // Recuperar usuario insertado
-      console.log('🔍 Recuperando usuario creado...');
-      const [newUser] = await db.execute('SELECT * FROM usuarios WHERE id = ?', [insertResult.insertId]);
-      
-      if (newUser.length === 0) {
-        throw new Error(`Usuario con ID ${insertResult.insertId} no encontrado después del INSERT`);
-      }
-      
-      console.log('✅ Usuario recuperado:', { id: newUser[0].id, email: newUser[0].email });
-
-      // Generar token simple
-      console.log('🔍 Generando token...');
-      const jwt = await import('jsonwebtoken');
-      const token = jwt.default.sign(
-        { id: insertResult.insertId, email }, 
-        process.env.JWT_SECRET || 'default_secret', 
-        { expiresIn: '1h' }
-      );
-      console.log('✅ Token generado');
-
-      console.log('🎉 REGISTRO COMPLETADO EXITOSAMENTE\n');
-
-      res.status(201).json({
-        status: 'success',
-        message: 'Usuario creado exitosamente con debug',
-        data: {
-          user: {
-            id: newUser[0].id,
-            nombre: newUser[0].nombre,
-            apellido: newUser[0].apellido,
-            email: newUser[0].email,
-            rol: newUser[0].rol
-          },
-          token,
-          debug: {
-            insertId: insertResult.insertId,
-            affectedRows: insertResult.affectedRows,
-            usuariosAntes: beforeCount[0].total,
-            usuariosDespues: afterCount[0].total,
-            usuariosCreados: usuariosCreados
-          }
-        }
-      });
-
-    } catch (error) {
-      console.error('💥 ERROR EN REGISTRO SIMPLIFICADO:');
-      console.error('📝 Mensaje:', error.message);
-      console.error('📚 Stack:', error.stack);
-      
-      res.status(500).json({
-        status: 'error',
-        message: 'Error en registro simplificado',
-        debug: {
-          error: error.message,
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-  });
-
-  console.log('✅ Endpoints de debug configurados');
-}
-
-// =====================================================
-// RUTAS DE UTILIDAD
-// =====================================================
-
-// Test de CORS (solo en desarrollo)
-if (!isProduction) {
-  app.get('/test-cors', (req, res) => {
-    res.json({
-      message: 'CORS funcionando correctamente',
-      environment: 'development',
-      origin: req.get('Origin'),
-      api_url: SERVER_CONFIG.API_URL,
-      timestamp: new Date().toISOString()
-    });
-  });
-}
-
-// =====================================================
-// DOCUMENTACIÓN SWAGGER
-// =====================================================
-
-try {
-  setupSwagger(app);
-  console.log(`📚 Swagger configurado en ${SERVER_CONFIG.API_URL}/api-docs`);
-} catch (error) {
-  console.warn('⚠️ Error configurando Swagger:', error.message);
-}
-
-// =====================================================
-// DOCUMENTACIÓN SWAGGER PARA ENDPOINTS DE SISTEMA
-// =====================================================
-
-/**
- * @swagger
- * tags:
- *   - name: Sistema
- *     description: Endpoints de monitoreo y estado del sistema
- *   - name: Debug
- *     description: Endpoints de debugging y testing (solo desarrollo)
- *   - name: Autenticación
- *     description: Endpoints de autenticación y autorización
- *   - name: Usuarios
- *     description: Gestión de usuarios del sistema
- *   - name: Instituciones
- *     description: Gestión de instituciones y organizaciones
- */
 
 /**
  * @swagger
  * /:
  *   get:
- *     summary: Health check básico del sistema
- *     description: Retorna información básica del estado del servidor con URLs dinámicas
+ *     summary: Información general del API
  *     tags: [Sistema]
  *     responses:
  *       200:
- *         description: Servidor funcionando correctamente
+ *         description: Información del servidor y endpoints disponibles
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 mensaje:
+ *                   type: string
+ *                   example: API Rifas Solidarias
+ *                 version:
+ *                   type: string
+ *                   example: 2.0.0
+ *                 status:
+ *                   type: string
+ *                   example: Funcionando correctamente
+ *                 modules:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: [auth, instituciones, usuarios, rifas]
+ */
+
+/**
+ * @swagger
+ * /test-db:
+ *   get:
+ *     summary: Test de conexión a base de datos
+ *     tags: [Sistema]
+ *     responses:
+ *       200:
+ *         description: Conexión exitosa a la base de datos
  *         content:
  *           application/json:
  *             schema:
@@ -478,171 +147,479 @@ try {
  *                 status:
  *                   type: string
  *                   example: OK
- *                 service:
+ *                 base_datos:
  *                   type: string
- *                   example: Rifas Solidarias API
+ *                   example: rifas_solidarias_nuevo
  *                 version:
  *                   type: string
- *                   example: 2.0.0
- *                 environment:
- *                   type: string
- *                   example: production
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *                 urls:
+ *                   example: 10.5.23-MariaDB
+ *                 estadisticas:
  *                   type: object
  *                   properties:
- *                     api:
- *                       type: string
- *                       example: https://apirifas.huelemu.com.ar
- *                     frontend:
- *                       type: string
- *                       example: https://rifas.huelemu.com.ar
+ *                     usuarios:
+ *                       type: integer
+ *                     instituciones:
+ *                       type: integer
+ *                     rifas:
+ *                       type: integer
+ *       500:
+ *         description: Error de conexión a la base de datos
  */
 
 /**
  * @swagger
- * /env-info:
+ * /stats/public:
  *   get:
- *     summary: Información del entorno actual
- *     description: Retorna información detallada sobre el entorno de ejecución
+ *     summary: Estadísticas públicas del sistema
  *     tags: [Sistema]
  *     responses:
  *       200:
- *         description: Información del entorno obtenida exitosamente
+ *         description: Estadísticas generales sin datos sensibles
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 environment:
+ *                 status:
  *                   type: string
- *                   example: production
- *                 api_url:
- *                   type: string
- *                   example: https://apirifas.huelemu.com.ar
- *                 debug_available:
- *                   type: boolean
- *                   example: false
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     rifas_activas:
+ *                       type: integer
+ *                       example: 5
+ *                     instituciones_participantes:
+ *                       type: integer
+ *                       example: 12
+ *                     numeros_vendidos:
+ *                       type: integer
+ *                       example: 1567
+ *                     recaudacion_total:
+ *                       type: number
+ *                       example: 78350.00
  */
 
-// =====================================================
-// MIDDLEWARE DE ERRORES
-// =====================================================
+// Ruta raíz con información del API
+app.get('/', (req, res) => {
+  res.json({
+    mensaje: 'API Rifas Solidarias',
+    version: '2.0.0',
+    status: 'Funcionando correctamente',
+    server_time: new Date().toISOString(),
+    modules: ['auth', 'instituciones', 'usuarios', 'rifas'],
+    endpoints: {
+      auth: [
+        'POST /auth/register',
+        'POST /auth/login', 
+        'POST /auth/refresh',
+        'POST /auth/logout',
+        'GET /auth/me'
+      ],
+      instituciones: [
+        'GET /instituciones',
+        'POST /instituciones',
+        'GET /instituciones/:id',
+        'PUT /instituciones/:id',
+        'DELETE /instituciones/:id'
+      ],
+      usuarios: [
+        'GET /usuarios',
+        'POST /usuarios',
+        'GET /usuarios/:id', 
+        'PUT /usuarios/:id',
+        'DELETE /usuarios/:id'
+      ],
+      rifas: [
+        // Rifas públicas
+        'GET /rifas/publicas',
+        'GET /rifas/publicas/:id',
+        'GET /rifas/publicas/:id/numeros',
+        
+        // CRUD rifas
+        'GET /rifas',
+        'POST /rifas',
+        'GET /rifas/:id',
+        'PUT /rifas/:id', 
+        'DELETE /rifas/:id',
+        
+        // Gestión de números
+        'GET /rifas/:id/numeros',
+        'POST /rifas/:rifa_id/numeros/:numero/vender',
+        'POST /rifas/:rifa_id/numeros/:numero/reservar',
+        'DELETE /rifas/:rifa_id/numeros/:numero/venta',
+        
+        // Compras
+        'POST /rifas/:rifa_id/comprar',
+        'GET /rifas/usuario/mis-rifas',
+        'GET /rifas/:rifa_id/mis-numeros',
+        
+        // Administración
+        'POST /rifas/:rifa_id/asignar-numeros',
+        'GET /rifas/:rifa_id/instituciones/:institucion_id/numeros',
+        'GET /rifas/:rifa_id/vendedor/numeros',
+        
+        // Reportes
+        'GET /rifas/:rifa_id/estadisticas',
+        'GET /rifas/:rifa_id/reporte-instituciones', 
+        'GET /rifas/:rifa_id/reporte-vendedores',
+        'GET /rifas/:rifa_id/comisiones',
+        'GET /rifas/:rifa_id/exportar',
+        
+        // Participaciones
+        'POST /rifas/:rifa_id/invitar-institucion',
+        'PUT /rifas/:rifa_id/participacion',
+        
+        // Sistema
+        'POST /rifas/sistema/liberar-reservas'
+      ],
+      testing: [
+        'GET /test-db',
+        'GET /test-jwt',
+        'GET /test-cors',
+        'GET /stats/public'
+      ],
+      docs: [
+        'GET /api-docs'
+      ]
+    }
+  });
+});
 
-// Middleware para rutas no encontradas
-app.use('*', (req, res) => {
-  const availableEndpoints = [
-    'GET /',
-    'GET /health',
-    'GET /test-db',
-    'GET /env-info',
-    'GET /api-docs',
-    'POST /auth/login',
-    'POST /auth/register',
-    'GET /instituciones',
-    'GET /usuarios'
-  ];
-
-  // Agregar endpoints de debug solo en desarrollo
-  if (!isProduction) {
-    availableEndpoints.push(
-      'GET /debug/usuarios',
-      'POST /debug/register-simple',
-      'GET /test-cors'
-    );
+// Test de conexión a BD
+app.get('/test-db', async (req, res) => {
+  try {
+    console.log('🔍 Probando conexión a base de datos...');
+    
+    const [test] = await db.execute('SELECT 1 as conexion');
+    const [info] = await db.execute('SELECT DATABASE() as base, VERSION() as version');
+    const [tablas] = await db.execute('SHOW TABLES');
+    
+    // Estadísticas básicas
+    const [usuarios] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
+    const [instituciones] = await db.execute('SELECT COUNT(*) as total FROM instituciones');
+    
+    // ✅ NUEVAS ESTADÍSTICAS DE RIFAS
+    const [rifas] = await db.execute('SELECT COUNT(*) as total FROM rifas');
+    const [rifasActivas] = await db.execute('SELECT COUNT(*) as total FROM rifas WHERE estado = "activa"');
+    const [numerosVendidos] = await db.execute('SELECT COUNT(*) as total FROM numeros_rifa WHERE estado = "vendido"');
+    
+    console.log('✅ Conexión a BD exitosa');
+    
+    res.json({
+      status: 'OK',
+      conexion: test[0].conexion,
+      base_datos: info[0].base,
+      version: info[0].version,
+      total_tablas: tablas.length,
+      estadisticas: {
+        usuarios: usuarios[0].total,
+        instituciones: instituciones[0].total,
+        rifas: rifas[0].total,
+        rifas_activas: rifasActivas[0].total,
+        numeros_vendidos: numerosVendidos[0].total
+      },
+      tablas: tablas.map(t => Object.values(t)[0]),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error en test-db:', error);
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message,
+      codigo: error.code
+    });
   }
+});
 
+// Test específico para JWT
+app.get('/test-jwt', (req, res) => {
+  const jwtConfig = {
+    access_secret: process.env.JWT_ACCESS_SECRET ? '✅ Configurado' : '❌ Falta configurar',
+    refresh_secret: process.env.JWT_REFRESH_SECRET ? '✅ Configurado' : '❌ Falta configurar',
+    access_expires: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
+    refresh_expires: process.env.JWT_REFRESH_EXPIRES_IN || '7d'
+  };
+
+  res.json({
+    status: 'OK',
+    jwt_config: jwtConfig,
+    node_env: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Test de CORS
+app.get('/test-cors', (req, res) => {
+  const origin = req.get('origin');
+  const userAgent = req.get('user-agent');
+  
+  res.json({
+    status: 'OK',
+    message: 'CORS funcionando correctamente',
+    origin: origin,
+    user_agent: userAgent,
+    headers: req.headers,
+    method: req.method
+  });
+});
+
+// Estadísticas públicas
+app.get('/stats/public', optionalAuth, async (req, res) => {
+  try {
+    // Estadísticas públicas sin datos sensibles
+    const [estadisticas] = await db.execute(`
+      SELECT 
+        (SELECT COUNT(*) FROM rifas WHERE estado = 'activa') as rifas_activas,
+        (SELECT COUNT(*) FROM instituciones WHERE estado = 'activa') as instituciones_activas,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE estado = 'vendido') as numeros_vendidos,
+        (SELECT COALESCE(SUM(precio_numero), 0) FROM rifas r 
+         JOIN numeros_rifa nr ON r.id = nr.rifa_id 
+         WHERE nr.estado = 'vendido') as recaudacion_total
+    `);
+
+    const stats = estadisticas[0];
+    
+    res.json({
+      status: 'success',
+      data: {
+        rifas_activas: stats.rifas_activas,
+        instituciones_participantes: stats.instituciones_activas,
+        numeros_vendidos: stats.numeros_vendidos,
+        recaudacion_total: parseFloat(stats.recaudacion_total),
+        ultimo_update: new Date().toISOString()
+      },
+      user_authenticated: !!req.user
+    });
+
+  } catch (error) {
+    console.error('❌ Error en estadísticas públicas:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener estadísticas'
+    });
+  }
+});
+
+// ✅ NUEVO: Test específico para rifas
+app.get('/test-rifas', requireAuth, async (req, res) => {
+  try {
+    const [testRifas] = await db.execute(`
+      SELECT 
+        r.id,
+        r.nombre,
+        r.estado,
+        r.cantidad_numeros,
+        r.precio_numero,
+        i.nombre as institucion_nombre,
+        COUNT(nr.id) as numeros_generados,
+        SUM(CASE WHEN nr.estado = 'vendido' THEN 1 ELSE 0 END) as numeros_vendidos
+      FROM rifas r
+      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+      LEFT JOIN numeros_rifa nr ON r.id = nr.rifa_id
+      GROUP BY r.id
+      LIMIT 5
+    `);
+
+    res.json({
+      status: 'OK',
+      message: 'Módulo de rifas funcionando correctamente',
+      sample_data: testRifas,
+      user: {
+        id: req.user.id,
+        nombre: req.user.nombre,
+        rol: req.user.rol,
+        institucion_id: req.user.institucion_id
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en test-rifas:', error);
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message
+    });
+  }
+});
+
+// =====================================================
+// RUTAS PRINCIPALES
+// =====================================================
+
+console.log('🛣️ Configurando rutas...');
+
+// Rutas de autenticación
+app.use('/auth', authRoutes);
+console.log('✅ Rutas de autenticación configuradas');
+
+// Rutas de instituciones
+app.use('/instituciones', institucionRoutes);
+console.log('✅ Rutas de instituciones configuradas');
+
+// Rutas de usuarios
+app.use('/usuarios', usuariosRoutes);
+console.log('✅ Rutas de usuarios configuradas');
+
+// ✅ NUEVAS RUTAS DE RIFAS
+app.use('/rifas', rifasRoutes);
+console.log('✅ Rutas de rifas configuradas');
+
+console.log('🎯 Todas las rutas configuradas correctamente');
+
+// =====================================================
+// DOCUMENTACIÓN SWAGGER
+// =====================================================
+
+try {
+  setupSwagger(app);
+  console.log('📚 Swagger configurado correctamente');
+} catch (error) {
+  console.warn('⚠️ Error configurando Swagger:', error.message);
+}
+
+// =====================================================
+// MIDDLEWARE DE ERRORES GLOBALES
+// =====================================================
+
+// Middleware de manejo de errores
+app.use((error, req, res, next) => {
+  console.error('❌ Error no manejado:', error);
+  
+  // Error de parsing JSON
+  if (error.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      status: 'error',
+      message: 'JSON inválido en el cuerpo de la petición'
+    });
+  }
+  
+  // Error de tamaño de payload
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({
+      status: 'error',
+      message: 'El tamaño del archivo es demasiado grande'
+    });
+  }
+  
+  // Error de base de datos
+  if (error.code && error.code.startsWith('ER_')) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Error de base de datos',
+      ...(process.env.NODE_ENV === 'development' && { details: error.message })
+    });
+  }
+  
+  res.status(500).json({
+    status: 'error',
+    message: 'Error interno del servidor',
+    ...(process.env.NODE_ENV === 'development' && { 
+      details: error.message,
+      stack: error.stack 
+    })
+  });
+});
+
+// Manejo de rutas no encontradas
+app.use('*', (req, res) => {
+  console.log(`🔍 Ruta no encontrada: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     status: 'error',
     message: 'Endpoint no encontrado',
     path: req.originalUrl,
     method: req.method,
-    environment: SERVER_CONFIG.ENVIRONMENT,
-    api_url: SERVER_CONFIG.API_URL,
-    timestamp: new Date().toISOString(),
-    available_endpoints: availableEndpoints
+    suggestion: 'Verifica la documentación en /api-docs',
+    available_modules: ['auth', 'instituciones', 'usuarios', 'rifas']
   });
 });
 
-// Middleware global de manejo de errores
-app.use(errorHandler);
-
 // =====================================================
-// INICIALIZACIÓN DEL SERVIDOR
+// INICIAR SERVIDOR
 // =====================================================
 
-async function startServer() {
-  try {
-    // Verificar conexión a base de datos
-    console.log('🔍 Verificando conexión a base de datos...');
-    const dbConnected = await testConnection();
-    
-    if (!dbConnected) {
-      console.error('❌ No se pudo conectar a la base de datos');
-      console.error('   Verifica tu configuración en .env');
-      process.exit(1);
-    }
-    
-    // Iniciar servidor
-    app.listen(PORT, () => {
-      console.log('\n🎉 =======================================');
-      console.log(`   ✅ SERVIDOR INICIADO EXITOSAMENTE`);
-      console.log(`   🌍 Entorno: ${SERVER_CONFIG.ENVIRONMENT.toUpperCase()}`);
-      console.log(`   🌐 URL: ${SERVER_CONFIG.API_URL}`);
-      console.log(`   📚 Docs: ${SERVER_CONFIG.API_URL}/api-docs`);
-      console.log(`   🏥 Health: ${SERVER_CONFIG.API_URL}/health`);
-      console.log(`   🖥️ Frontend: ${SERVER_CONFIG.FRONTEND_URL}`);
-      console.log(`   🗄️ Base de datos: ${process.env.DB_NAME}`);
-      console.log('🎉 =======================================\n');
-      
-      if (!isProduction) {
-        console.log('💡 ENDPOINTS DE DEBUG DISPONIBLES:');
-        console.log(`   • GET ${SERVER_CONFIG.API_URL}/debug/usuarios`);
-        console.log(`   • DELETE ${SERVER_CONFIG.API_URL}/debug/limpiar-test`);
-        console.log(`   • POST ${SERVER_CONFIG.API_URL}/debug/register-simple`);
-        console.log(`   • GET ${SERVER_CONFIG.API_URL}/test-cors\n`);
-      }
-    });
-    
-  } catch (error) {
-    console.error('\n💥 =======================================');
-    console.error('   ❌ ERROR AL INICIAR SERVIDOR');
-    console.error('💥 =======================================');
-    console.error('Error:', error.message);
-    
-    console.log('\n🔧 POSIBLES SOLUCIONES:');
-    console.log('1. Verificar que MariaDB esté ejecutándose');
-    console.log('2. Revisar configuración en .env');
-    console.log('3. Verificar que la base de datos exista');
-    console.log('4. Revisar permisos de usuario de base de datos');
-    
+const PORT = process.env.PORT || 3100;
+
+// Función para verificar configuración antes de iniciar
+const verificarConfiguracion = () => {
+  const errores = [];
+  
+  if (!process.env.JWT_ACCESS_SECRET) {
+    errores.push('JWT_ACCESS_SECRET no configurado');
+  }
+  
+  if (!process.env.JWT_REFRESH_SECRET) {
+    errores.push('JWT_REFRESH_SECRET no configurado');
+  }
+  
+  if (!process.env.DB_HOST) {
+    errores.push('DB_HOST no configurado');
+  }
+  
+  if (!process.env.DB_USER) {
+    errores.push('DB_USER no configurado');
+  }
+  
+  if (!process.env.DB_PASSWORD) {
+    errores.push('DB_PASSWORD no configurado');
+  }
+  
+  if (!process.env.DB_NAME) {
+    errores.push('DB_NAME no configurado');
+  }
+  
+  if (errores.length > 0) {
+    console.error('❌ Errores de configuración:');
+    errores.forEach(error => console.error(`   - ${error}`));
+    console.error('❌ El servidor no puede iniciarse sin la configuración completa');
     process.exit(1);
   }
-}
+  
+  console.log('✅ Configuración verificada correctamente');
+};
 
-// Manejo de errores no capturados
-process.on('uncaughtException', (error) => {
-  console.error('💥 Excepción no capturada:', error);
-  process.exit(1);
+// Verificar configuración
+verificarConfiguracion();
+
+// Iniciar servidor
+app.listen(PORT, () => {
+  console.log('\n🚀 =======================================');
+  console.log(`   🎯 SERVIDOR INICIADO CORRECTAMENTE`);
+  console.log(`   📡 Puerto: ${PORT}`);
+  console.log(`   🌍 Entorno: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   📚 Documentación: http://localhost:${PORT}/api-docs`);
+  console.log(`   🔍 Health Check: http://localhost:${PORT}/`);
+  console.log(`   🧪 Tests: http://localhost:${PORT}/test-db`);
+  console.log('🚀 =======================================\n');
+  
+  console.log('📋 Módulos disponibles:');
+  console.log('   ✅ Autenticación (/auth)');
+  console.log('   ✅ Instituciones (/instituciones)');
+  console.log('   ✅ Usuarios (/usuarios)');
+  console.log('   ✅ Rifas (/rifas) - NUEVO!');
+  console.log('   ✅ Documentación (/api-docs)');
+  console.log('   ✅ Testing (/test-*)');
+  console.log('\n🎉 ¡Servidor listo para recibir requests!');
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('💥 Promesa rechazada no manejada:', reason);
-  process.exit(1);
-});
-
-// Graceful shutdown
+// Manejo graceful de cierre del servidor
 process.on('SIGTERM', () => {
-  console.log('\n👋 Cerrando servidor...');
+  console.log('🔄 Recibida señal SIGTERM. Cerrando servidor...');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('\n👋 Cerrando servidor...');
+  console.log('\n🔄 Recibida señal SIGINT. Cerrando servidor...');
   process.exit(0);
 });
 
-// Iniciar servidor
-startServer();
+// Manejo de errores no capturados
+process.on('uncaughtException', (error) => {
+  console.error('❌ Error no capturado:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promise rechazada no manejada:', reason);
+  process.exit(1);
+});
+
+export default app;

@@ -1,6 +1,6 @@
 // routes/test.js - Crear este archivo nuevo
 import express from 'express';
-import db from './src/config/db.js'; // Ajusta la ruta según tu estructura
+import db from '../src/config/db.js'; // Ajusta la ruta según tu estructura
 
 const router = express.Router();
 
