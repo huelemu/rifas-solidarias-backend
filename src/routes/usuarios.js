@@ -9,6 +9,8 @@ import {
 } from '../controllers/usuariosController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
+import { ROLES } from '../constants/roles.js';
+
 const router = express.Router();
 
 /**
@@ -244,7 +246,7 @@ const router = express.Router();
  *       403:
  *         $ref: '#/components/responses/ForbiddenError'
  */
-router.get('/', requireAuth, requireRole(['admin_global', 'admin_institucion']), obtenerUsuarios);
+router.get('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), obtenerUsuarios);
 
 /**
  * @swagger
@@ -294,7 +296,7 @@ router.get('/', requireAuth, requireRole(['admin_global', 'admin_institucion']),
  *       403:
  *         $ref: '#/components/responses/ForbiddenError'
  */
-router.get('/:id', requireAuth, requireRole(['admin_global', 'admin_institucion']), obtenerUsuarioPorId);
+router.get('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), obtenerUsuarioPorId);
 
 /**
  * @swagger
@@ -378,7 +380,7 @@ router.get('/:id', requireAuth, requireRole(['admin_global', 'admin_institucion'
  *       403:
  *         $ref: '#/components/responses/ForbiddenError'
  */
-router.post('/', requireAuth, requireRole(['admin_global', 'admin_institucion']), crearUsuario);
+router.post('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), crearUsuario);
 
 /**
  * @swagger
@@ -436,7 +438,7 @@ router.post('/', requireAuth, requireRole(['admin_global', 'admin_institucion'])
  *       403:
  *         $ref: '#/components/responses/ForbiddenError'
  */
-router.put('/:id', requireAuth, requireRole(['admin_global', 'admin_institucion']), actualizarUsuario);
+router.put('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), actualizarUsuario);
 
 /**
  * @swagger
@@ -476,6 +478,6 @@ router.put('/:id', requireAuth, requireRole(['admin_global', 'admin_institucion'
  *       403:
  *         $ref: '#/components/responses/ForbiddenError'
  */
-router.delete('/:id', requireAuth, requireRole(['admin_global']), eliminarUsuario);
+router.delete('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL]), eliminarUsuario);
 
 export default router;
