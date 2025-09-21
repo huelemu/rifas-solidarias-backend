@@ -1,10 +1,19 @@
 // =====================================================
-// CONFIGURACIÓN COMPLETA DE SWAGGER
+// CONFIGURACIÓN COMPLETA DE SWAGGER CON SOPORTE DE PRODUCCIÓN
 // src/config/swagger.js
 // =====================================================
 
 import swaggerJSDoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
+
+// Detección automática de entorno
+const isProduction = process.env.NODE_ENV === 'production' || 
+                     process.env.DOMAIN === 'apirifas.huelemu.com.ar' ||
+                     process.env.HOST === 'apirifas.huelemu.com.ar' ||
+                     process.env.HOSTING === 'huelemu';
+
+const API_URL = isProduction ? 'https://apirifas.huelemu.com.ar' : `http://localhost:${process.env.PORT || 3100}`;
+const FRONTEND_URL = isProduction ? 'https://rifas.huelemu.com.ar' : 'http://localhost:4200';
 
 const swaggerDefinition = {
   openapi: '3.0.0',
@@ -20,6 +29,11 @@ Esta API permite gestionar un sistema completo de rifas solidarias donde múltip
 - Vender números de rifa
 - Gestionar usuarios y roles
 - Obtener reportes y estadísticas
+
+## Entorno actual:
+- **Modo**: ${isProduction ? 'PRODUCCIÓN' : 'DESARROLLO'}
+- **API URL**: ${API_URL}
+- **Frontend URL**: ${FRONTEND_URL}
 
 ## Características principales:
 - 🔐 **Autenticación JWT** con refresh tokens
@@ -47,26 +61,30 @@ Esta API permite gestionar un sistema completo de rifas solidarias donde múltip
     contact: {
       name: 'Soporte Técnico - Rifas Solidarias',
       email: 'soporte@rifas-solidarias.com',
-      url: 'https://rifas-solidarias.com/soporte'
+      url: isProduction ? 'https://rifas.huelemu.com.ar/soporte' : 'http://localhost:4200/soporte'
     },
     license: {
       name: 'MIT',
       url: 'https://opensource.org/licenses/MIT'
-    },
-    termsOfService: 'https://rifas-solidarias.com/terminos'
+    }
   },
-  servers: [
+  servers: isProduction ? [
+    {
+      url: 'https://apirifas.huelemu.com.ar',
+      description: '🚀 Servidor de producción (Huelemu)'
+    },
     {
       url: 'http://localhost:3100',
-      description: 'Servidor de desarrollo local'
+      description: '🔧 Servidor de desarrollo local'
+    }
+  ] : [
+    {
+      url: 'http://localhost:3100',
+      description: '🔧 Servidor de desarrollo local'
     },
     {
       url: 'https://apirifas.huelemu.com.ar',
-      description: 'Servidor de producción'
-    },
-    {
-      url: 'https://api-staging.rifas-solidarias.com',
-      description: 'Servidor de staging'
+      description: '🚀 Servidor de producción (Huelemu)'
     }
   ],
   components: {
@@ -101,27 +119,6 @@ Esta API permite gestionar un sistema completo de rifas solidarias donde múltip
           maximum: 100,
           default: 20
         }
-      },
-      SortParam: {
-        name: 'sort',
-        in: 'query',
-        description: 'Campo por el cual ordenar',
-        required: false,
-        schema: {
-          type: 'string',
-          enum: ['id', 'nombre', 'email', 'fecha_creacion', 'fecha_actualizacion']
-        }
-      },
-      OrderParam: {
-        name: 'order',
-        in: 'query',
-        description: 'Dirección del ordenamiento',
-        required: false,
-        schema: {
-          type: 'string',
-          enum: ['asc', 'desc'],
-          default: 'desc'
-        }
       }
     },
     responses: {
@@ -146,40 +143,6 @@ Esta API permite gestionar un sistema completo de rifas solidarias donde múltip
                 timestamp: {
                   type: 'string',
                   format: 'date-time'
-                }
-              }
-            }
-          }
-        }
-      },
-      BadRequest: {
-        description: 'Solicitud inválida',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                status: {
-                  type: 'string',
-                  example: 'error'
-                },
-                message: {
-                  type: 'string',
-                  example: 'Datos de entrada inválidos'
-                },
-                errors: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      field: {
-                        type: 'string'
-                      },
-                      message: {
-                        type: 'string'
-                      }
-                    }
-                  }
                 }
               }
             }
@@ -248,38 +211,6 @@ Esta API permite gestionar un sistema completo de rifas solidarias donde múltip
                 message: {
                   type: 'string',
                   example: 'Recurso no encontrado'
-                },
-                resource: {
-                  type: 'string',
-                  example: 'Usuario'
-                },
-                id: {
-                  type: 'integer',
-                  example: 123
-                }
-              }
-            }
-          }
-        }
-      },
-      InternalServerError: {
-        description: 'Error interno del servidor',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                status: {
-                  type: 'string',
-                  example: 'error'
-                },
-                message: {
-                  type: 'string',
-                  example: 'Error interno del servidor'
-                },
-                timestamp: {
-                  type: 'string',
-                  format: 'date-time'
                 }
               }
             }
@@ -311,7 +242,11 @@ Esta API permite gestionar un sistema completo de rifas solidarias donde múltip
     },
     {
       name: 'Debug',
-      description: '🐛 Endpoints de debugging (solo desarrollo)'
+      description: '🐛 Endpoints de debugging (solo desarrollo)',
+      externalDocs: {
+        description: 'Solo disponible en modo desarrollo',
+        url: isProduction ? '#' : `${API_URL}/debug/usuarios`
+      }
     }
   ]
 };
@@ -332,15 +267,16 @@ export const setupSwagger = (app) => {
     const swaggerOptions = {
       explorer: true,
       swaggerOptions: {
-        persistAuthorization: true, // Mantener autorización entre recargas
-        filter: true, // Habilitar filtros
-        tryItOutEnabled: true, // Habilitar "Try it out" por defecto
-        requestSnippetsEnabled: true, // Mostrar snippets de código
-        defaultModelsExpandDepth: 2, // Expandir modelos por defecto
+        persistAuthorization: true,
+        filter: true,
+        tryItOutEnabled: true,
+        requestSnippetsEnabled: true,
+        defaultModelsExpandDepth: 2,
         defaultModelExpandDepth: 2,
-        docExpansion: 'list', // 'list', 'full', 'none'
-        operationsSorter: 'alpha', // Ordenar operaciones alfabéticamente
-        tagsSorter: 'alpha' // Ordenar tags alfabéticamente
+        docExpansion: 'list',
+        operationsSorter: 'alpha',
+        tagsSorter: 'alpha',
+        url: `${API_URL}/api-docs.json`
       },
       customCss: `
         .swagger-ui .topbar { 
@@ -354,29 +290,25 @@ export const setupSwagger = (app) => {
           color: #2c3e50;
         }
         .swagger-ui .scheme-container {
-          background: #f8f9fa;
-          border: 1px solid #dee2e6;
+          background: ${isProduction ? '#e8f5e8' : '#f8f9fa'};
+          border: 1px solid ${isProduction ? '#28a745' : '#dee2e6'};
           border-radius: 0.375rem;
           padding: 1rem;
           margin: 1rem 0;
         }
-        .swagger-ui .opblock.opblock-post {
-          border-color: #28a745;
-        }
-        .swagger-ui .opblock.opblock-get {
-          border-color: #007bff;
-        }
-        .swagger-ui .opblock.opblock-put {
-          border-color: #ffc107;
-        }
-        .swagger-ui .opblock.opblock-delete {
-          border-color: #dc3545;
-        }
-        .swagger-ui .opblock-summary {
-          font-weight: 600;
+        .swagger-ui .info .description::before {
+          content: "${isProduction ? '🚀 PRODUCCIÓN' : '🔧 DESARROLLO'}";
+          display: block;
+          font-weight: bold;
+          color: ${isProduction ? '#28a745' : '#007bff'};
+          margin-bottom: 1rem;
+          padding: 0.5rem;
+          background: ${isProduction ? '#d4edda' : '#e7f3ff'};
+          border-radius: 0.25rem;
+          text-align: center;
         }
       `,
-      customSiteTitle: 'Rifas Solidarias API - Documentación',
+      customSiteTitle: `Rifas Solidarias API - ${isProduction ? 'Producción' : 'Desarrollo'}`,
       customfavIcon: '/favicon.ico'
     };
     
@@ -395,110 +327,85 @@ export const setupSwagger = (app) => {
         name: specs.info.title,
         version: specs.info.version,
         description: 'API para sistema de rifas solidarias',
-        documentation: '/api-docs',
-        health: '/health',
+        environment: isProduction ? 'production' : 'development',
+        api_url: API_URL,
+        frontend_url: FRONTEND_URL,
+        documentation: `${API_URL}/api-docs`,
+        health: `${API_URL}/health`,
         total_endpoints: Object.keys(specs.paths || {}).length,
         total_tags: specs.tags ? specs.tags.length : 0,
         servers: specs.servers,
-        contact: specs.info.contact
+        contact: specs.info.contact,
+        timestamp: new Date().toISOString()
       });
     });
     
-    console.log('📚 Swagger configurado exitosamente en /api-docs');
-    console.log('📊 Información de API disponible en /api-info');
+    console.log(`📚 Swagger configurado en ${API_URL}/api-docs`);
+    console.log(`📊 Entorno: ${isProduction ? 'PRODUCCIÓN' : 'DESARROLLO'}`);
     
   } catch (error) {
     console.error('⚠️ Error configurando Swagger:', error.message);
     
-    // Configurar una página simple de documentación como fallback
+    // Página de fallback con URLs dinámicas
     app.get('/api-docs', (req, res) => {
       res.send(`
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Rifas Solidarias API</title>
+            <title>Rifas Solidarias API - ${isProduction ? 'Producción' : 'Desarrollo'}</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
               body { 
-                font-family: Arial, sans-serif; 
-                margin: 40px; 
-                background-color: #f8f9fa;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 0;
+                padding: 40px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
               }
               .container { 
-                max-width: 800px; 
+                max-width: 900px; 
                 margin: 0 auto; 
                 background: white; 
-                padding: 30px; 
-                border-radius: 8px; 
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                padding: 40px; 
+                border-radius: 12px; 
+                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+              }
+              .badge {
+                display: inline-block;
+                padding: 6px 12px;
+                border-radius: 20px;
+                font-size: 0.8em;
+                font-weight: bold;
+                margin-bottom: 10px;
+                ${isProduction ? 
+                  'background: #d4edda; color: #155724; border: 1px solid #c3e6cb;' : 
+                  'background: #cce5ff; color: #004085; border: 1px solid #99d6ff;'
+                }
               }
               h1 { color: #2c3e50; }
-              h2 { color: #34495e; margin-top: 30px; }
-              ul { line-height: 1.6; }
               .endpoint { 
                 background: #f1f2f6; 
-                padding: 10px; 
-                margin: 5px 0; 
-                border-radius: 4px; 
+                padding: 12px; 
+                margin: 8px 0; 
+                border-radius: 6px; 
                 font-family: monospace;
               }
-              .method { 
-                font-weight: bold; 
-                padding: 2px 6px; 
-                border-radius: 3px; 
-                color: white; 
-                margin-right: 10px;
-              }
-              .get { background-color: #007bff; }
-              .post { background-color: #28a745; }
-              .put { background-color: #ffc107; color: #212529; }
-              .delete { background-color: #dc3545; }
             </style>
           </head>
           <body>
             <div class="container">
+              <div class="badge">${isProduction ? '🚀 PRODUCCIÓN' : '🔧 DESARROLLO'}</div>
               <h1>🎫 Rifas Solidarias API</h1>
-              <p><strong>Versión:</strong> 2.0.0</p>
-              <p><strong>Estado:</strong> Documentación temporalmente no disponible</p>
+              <p><strong>API URL:</strong> ${API_URL}</p>
+              <p><strong>Frontend:</strong> ${FRONTEND_URL}</p>
+              <p>Documentación completa temporalmente no disponible</p>
               
-              <h2>📋 Endpoints Principales Disponibles</h2>
+              <h2>Endpoints principales:</h2>
+              <div class="endpoint">GET ${API_URL}/health</div>
+              <div class="endpoint">POST ${API_URL}/auth/login</div>
+              <div class="endpoint">GET ${API_URL}/instituciones</div>
               
-              <h3>🔐 Autenticación</h3>
-              <div class="endpoint"><span class="method post">POST</span>/auth/register - Registrar usuario</div>
-              <div class="endpoint"><span class="method post">POST</span>/auth/login - Iniciar sesión</div>
-              <div class="endpoint"><span class="method get">GET</span>/auth/me - Obtener perfil</div>
-              <div class="endpoint"><span class="method post">POST</span>/auth/refresh - Renovar token</div>
-              <div class="endpoint"><span class="method post">POST</span>/auth/logout - Cerrar sesión</div>
-              
-              <h3>🏢 Instituciones</h3>
-              <div class="endpoint"><span class="method get">GET</span>/instituciones - Listar instituciones</div>
-              <div class="endpoint"><span class="method post">POST</span>/instituciones - Crear institución</div>
-              <div class="endpoint"><span class="method get">GET</span>/instituciones/{id} - Obtener institución</div>
-              <div class="endpoint"><span class="method put">PUT</span>/instituciones/{id} - Actualizar institución</div>
-              
-              <h3>👥 Usuarios</h3>
-              <div class="endpoint"><span class="method get">GET</span>/usuarios - Listar usuarios</div>
-              <div class="endpoint"><span class="method post">POST</span>/usuarios - Crear usuario</div>
-              <div class="endpoint"><span class="method get">GET</span>/usuarios/{id} - Obtener usuario</div>
-              <div class="endpoint"><span class="method put">PUT</span>/usuarios/{id} - Actualizar usuario</div>
-              
-              <h3>🔧 Sistema</h3>
-              <div class="endpoint"><span class="method get">GET</span>/ - Health check básico</div>
-              <div class="endpoint"><span class="method get">GET</span>/health - Estado del sistema</div>
-              <div class="endpoint"><span class="method get">GET</span>/test-db - Test de base de datos</div>
-              
-              <h2>🔑 Autenticación</h2>
-              <p>Para acceder a endpoints protegidos, incluye el header:</p>
-              <div class="endpoint">Authorization: Bearer {tu_access_token}</div>
-              
-              <h2>📞 Contacto</h2>
-              <p>Soporte técnico: <a href="mailto:soporte@rifas-solidarias.com">soporte@rifas-solidarias.com</a></p>
-              
-              <h2>🔗 Enlaces útiles</h2>
-              <ul>
-                <li><a href="/health">Estado del sistema</a></li>
-                <li><a href="/test-db">Test de base de datos</a></li>
-                <li><a href="/api-info">Información de la API</a></li>
-              </ul>
+              <p>Contacto: <a href="mailto:soporte@rifas-solidarias.com">soporte@rifas-solidarias.com</a></p>
             </div>
           </body>
         </html>

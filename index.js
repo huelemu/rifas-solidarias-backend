@@ -1,6 +1,6 @@
 // =====================================================
 // SERVIDOR PRINCIPAL - RIFAS SOLIDARIAS BACKEND
-// index.js
+// index.js - CON SOPORTE COMPLETO PARA PRODUCCIÓN
 // =====================================================
 
 import express from 'express';
@@ -14,7 +14,6 @@ import { errorHandler } from './src/middleware/errorHandler.js';
 import authRoutes from './src/routes/auth.js';
 import institucionRoutes from './src/routes/instituciones.js';
 import usuariosRoutes from './src/routes/usuarios.js';
-// import rifasRoutes from './src/routes/rifas.js'; // Comentado temporalmente
 
 // =====================================================
 // CONFIGURACIÓN INICIAL
@@ -25,15 +24,29 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3100;
 
+// Detección automática de entorno
+const isProduction = process.env.NODE_ENV === 'production' || 
+                     process.env.DOMAIN === 'apirifas.huelemu.com.ar' ||
+                     process.env.HOST === 'apirifas.huelemu.com.ar' ||
+                     process.env.HOSTING === 'huelemu';
+
+const SERVER_CONFIG = {
+  API_URL: isProduction ? 'https://apirifas.huelemu.com.ar' : `http://localhost:${PORT}`,
+  FRONTEND_URL: isProduction ? 'https://rifas.huelemu.com.ar' : 'http://localhost:4200',
+  ENVIRONMENT: isProduction ? 'production' : 'development'
+};
+
 console.log('\n🚀 =======================================');
 console.log('   🎯 RIFAS SOLIDARIAS - BACKEND API');
+console.log(`   🌍 Entorno: ${SERVER_CONFIG.ENVIRONMENT.toUpperCase()}`);
+console.log(`   🌐 API: ${SERVER_CONFIG.API_URL}`);
 console.log('🚀 =======================================\n');
 
 // =====================================================
 // MIDDLEWARE GLOBAL
 // =====================================================
 
-// CORS configurado para desarrollo y producción
+// CORS configurado dinámicamente
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
@@ -42,13 +55,15 @@ const corsOptions = {
       'http://localhost:4200',    // Angular dev
       'http://localhost:5173',    // Vite dev
       'https://rifas.huelemu.com.ar',  // Producción frontend
-      process.env.FRONTEND_URL,   // URL de producción adicional
+      'https://apirifas.huelemu.com.ar', // API producción
+      SERVER_CONFIG.FRONTEND_URL,  // URL dinámica
+      process.env.FRONTEND_URL,   // URL de .env
     ].filter(Boolean);
 
-    // En desarrollo, permitir requests sin origin (Postman, curl, etc.)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.warn(`🚫 CORS: Origen rechazado: ${origin}`);
       callback(new Error('No permitido por CORS'));
     }
   },
@@ -61,8 +76,8 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Logger de requests simple (solo en desarrollo)
-if (process.env.NODE_ENV === 'development') {
+// Logger de requests (solo en desarrollo)
+if (!isProduction) {
   app.use((req, res, next) => {
     const timestamp = new Date().toISOString();
     console.log(`📡 [${timestamp}] ${req.method} ${req.originalUrl} - ${req.ip}`);
@@ -74,20 +89,25 @@ if (process.env.NODE_ENV === 'development') {
 // VERIFICACIÓN DE SISTEMA
 // =====================================================
 
-// Health check endpoint
+// Health check endpoint con URLs dinámicas
 app.get('/', (req, res) => {
   res.json({
     status: 'OK',
     service: 'Rifas Solidarias API',
     version: '2.0.0',
+    environment: SERVER_CONFIG.ENVIRONMENT,
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
+    urls: {
+      api: SERVER_CONFIG.API_URL,
+      frontend: SERVER_CONFIG.FRONTEND_URL,
+      documentation: `${SERVER_CONFIG.API_URL}/api-docs`
+    },
     endpoints: {
       documentation: '/api-docs',
       auth: '/auth',
       institutions: '/instituciones',
       users: '/usuarios',
-      debug: '/debug/usuarios'
+      ...(isProduction ? {} : { debug: '/debug/usuarios' })
     }
   });
 });
@@ -99,6 +119,8 @@ app.get('/health', async (req, res) => {
     
     res.json({
       status: 'OK',
+      environment: SERVER_CONFIG.ENVIRONMENT,
+      api_url: SERVER_CONFIG.API_URL,
       database: dbConnected ? 'Connected' : 'Disconnected',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
@@ -107,6 +129,7 @@ app.get('/health', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       status: 'ERROR',
+      environment: SERVER_CONFIG.ENVIRONMENT,
       error: error.message,
       timestamp: new Date().toISOString()
     });
@@ -128,6 +151,8 @@ app.get('/test-db', async (req, res) => {
     
     res.json({
       status: 'OK',
+      environment: SERVER_CONFIG.ENVIRONMENT,
+      api_url: SERVER_CONFIG.API_URL,
       conexion: test[0].conexion,
       base_datos: info[0].base,
       version: info[0].version,
@@ -141,10 +166,24 @@ app.get('/test-db', async (req, res) => {
     console.error('❌ Error en test-db:', error);
     res.status(500).json({
       status: 'ERROR',
+      environment: SERVER_CONFIG.ENVIRONMENT,
       error: error.message,
       codigo: error.code
     });
   }
+});
+
+// Información del entorno
+app.get('/env-info', (req, res) => {
+  res.json({
+    environment: SERVER_CONFIG.ENVIRONMENT,
+    api_url: SERVER_CONFIG.API_URL,
+    frontend_url: SERVER_CONFIG.FRONTEND_URL,
+    version: '2.0.0',
+    node_version: process.version,
+    timestamp: new Date().toISOString(),
+    debug_available: !isProduction
+  });
 });
 
 // =====================================================
@@ -153,236 +192,239 @@ app.get('/test-db', async (req, res) => {
 
 console.log('🛣️ Configurando rutas...');
 
-// Rutas de autenticación
 app.use('/auth', authRoutes);
-
-// Rutas de recursos principales
 app.use('/instituciones', institucionRoutes);
 app.use('/usuarios', usuariosRoutes);
-
-// Rutas de rifas (comentado temporalmente)
-// app.use('/rifas', rifasRoutes);
 
 console.log('✅ Rutas configuradas correctamente');
 
 // =====================================================
-// ENDPOINTS DE DEBUG TEMPORAL
+// ENDPOINTS DE DEBUG (SOLO EN DESARROLLO)
 // =====================================================
 
-// Ver estado de usuarios
-app.get('/debug/usuarios', async (req, res) => {
-  try {
-    console.log('🔍 Ejecutando diagnóstico de usuarios...');
-    
-    const [count] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
-    const [ultimos] = await db.execute(`
-      SELECT id, nombre, apellido, email, rol, fecha_creacion
-      FROM usuarios ORDER BY id DESC LIMIT 10
-    `);
-    
-    const [testUsers] = await db.execute(`
-      SELECT id, nombre, apellido, email, rol, fecha_creacion
-      FROM usuarios 
-      WHERE email LIKE '%test%' OR email LIKE '%debug%'
-      ORDER BY id DESC
-    `);
-    
-    console.log('✅ Consultas de diagnóstico ejecutadas');
-    
-    res.json({
-      status: 'success',
-      timestamp: new Date().toISOString(),
-      data: {
-        total_usuarios: count[0].total,
-        ultimos_usuarios: ultimos,
-        usuarios_test: testUsers
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error en diagnóstico:', error);
-    res.status(500).json({ 
-      status: 'error',
-      error: error.message
-    });
-  }
-});
+if (!isProduction) {
+  console.log('🐛 Configurando endpoints de debug...');
 
-// Limpiar usuarios de prueba
-app.delete('/debug/limpiar-test', async (req, res) => {
-  try {
-    console.log('🧹 Limpiando usuarios de prueba...');
-    
-    const [result] = await db.execute(`
-      DELETE FROM usuarios 
-      WHERE email LIKE '%test%' 
-      OR email LIKE '%debug%'
-      OR email LIKE '%ejemplo%'
-    `);
-    
-    console.log(`✅ Eliminados ${result.affectedRows} usuarios de prueba`);
-    
-    res.json({
-      status: 'success',
-      message: `${result.affectedRows} usuarios de prueba eliminados`,
-      affected_rows: result.affectedRows,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error('❌ Error limpiando:', error);
-    res.status(500).json({ 
-      status: 'error',
-      error: error.message 
-    });
-  }
-});
-
-// Test simple de conexión
-app.get('/debug/test-connection', async (req, res) => {
-  try {
-    const [result] = await db.execute('SELECT 1 as test, NOW() as timestamp');
-    
-    res.json({
-      status: 'success',
-      message: 'Conexión a base de datos exitosa',
-      result: result[0]
-    });
-    
-  } catch (error) {
-    res.status(500).json({ 
-      status: 'error',
-      error: error.message 
-    });
-  }
-});
-
-// Registro simplificado para debug
-app.post('/debug/register-simple', async (req, res) => {
-  console.log('\n🧪 ================================');
-  console.log('   REGISTRO SIMPLIFICADO - DEBUG');
-  console.log('🧪 ================================');
-  
-  try {
-    const { nombre, apellido, email, password, rol = 'comprador' } = req.body;
-    
-    console.log('📝 Datos recibidos:', { nombre, apellido, email, rol });
-
-    // Verificar email único
-    console.log('🔍 Verificando email único...');
-    const [existing] = await db.execute('SELECT id, email FROM usuarios WHERE email = ?', [email]);
-    
-    if (existing.length > 0) {
-      console.log('❌ Email ya existe:', existing[0]);
-      return res.status(409).json({
+  // Ver estado de usuarios
+  app.get('/debug/usuarios', async (req, res) => {
+    try {
+      console.log('🔍 Ejecutando diagnóstico de usuarios...');
+      
+      const [count] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
+      const [ultimos] = await db.execute(`
+        SELECT id, nombre, apellido, email, rol, fecha_creacion
+        FROM usuarios ORDER BY id DESC LIMIT 10
+      `);
+      
+      const [testUsers] = await db.execute(`
+        SELECT id, nombre, apellido, email, rol, fecha_creacion
+        FROM usuarios 
+        WHERE email LIKE '%test%' OR email LIKE '%debug%'
+        ORDER BY id DESC
+      `);
+      
+      console.log('✅ Consultas de diagnóstico ejecutadas');
+      
+      res.json({
+        status: 'success',
+        environment: 'development',
+        timestamp: new Date().toISOString(),
+        data: {
+          total_usuarios: count[0].total,
+          ultimos_usuarios: ultimos,
+          usuarios_test: testUsers
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Error en diagnóstico:', error);
+      res.status(500).json({ 
         status: 'error',
-        message: 'Email ya existe',
-        debug: { existingUser: existing[0] }
+        error: error.message
       });
     }
-    console.log('✅ Email disponible');
+  });
 
-    // Hash de password
-    console.log('🔍 Encriptando password...');
-    const bcrypt = await import('bcrypt');
-    const hashedPassword = await bcrypt.default.hash(password, 10);
-    console.log('✅ Password encriptado');
-
-    // Contar usuarios antes
-    console.log('🔍 Contando usuarios ANTES del insert...');
-    const [beforeCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
-    console.log('📊 Usuarios antes:', beforeCount[0].total);
-
-    // INSERT con máximo detalle
-    console.log('🔍 Ejecutando INSERT...');
-    const insertSQL = `INSERT INTO usuarios (nombre, apellido, email, password, rol) VALUES (?, ?, ?, ?, ?)`;
-    const insertParams = [nombre, apellido, email, hashedPassword, rol];
-    
-    const [insertResult] = await db.execute(insertSQL, insertParams);
-    
-    console.log('✅ INSERT ejecutado:', {
-      insertId: insertResult.insertId,
-      affectedRows: insertResult.affectedRows
-    });
-
-    // Verificar que se insertó
-    console.log('🔍 Verificando inserción...');
-    const [afterCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
-    console.log('📊 Usuarios después:', afterCount[0].total);
-    
-    const usuariosCreados = afterCount[0].total - beforeCount[0].total;
-    console.log('📈 Usuarios creados:', usuariosCreados);
-
-    // Recuperar usuario insertado
-    console.log('🔍 Recuperando usuario creado...');
-    const [newUser] = await db.execute('SELECT * FROM usuarios WHERE id = ?', [insertResult.insertId]);
-    
-    if (newUser.length === 0) {
-      throw new Error(`Usuario con ID ${insertResult.insertId} no encontrado después del INSERT`);
-    }
-    
-    console.log('✅ Usuario recuperado:', { id: newUser[0].id, email: newUser[0].email });
-
-    // Generar token simple
-    console.log('🔍 Generando token...');
-    const jwt = await import('jsonwebtoken');
-    const token = jwt.default.sign(
-      { id: insertResult.insertId, email }, 
-      process.env.JWT_SECRET || 'default_secret', 
-      { expiresIn: '1h' }
-    );
-    console.log('✅ Token generado');
-
-    console.log('🎉 REGISTRO COMPLETADO EXITOSAMENTE\n');
-
-    res.status(201).json({
-      status: 'success',
-      message: 'Usuario creado exitosamente con debug',
-      data: {
-        user: {
-          id: newUser[0].id,
-          nombre: newUser[0].nombre,
-          apellido: newUser[0].apellido,
-          email: newUser[0].email,
-          rol: newUser[0].rol
-        },
-        token,
-        debug: {
-          insertId: insertResult.insertId,
-          affectedRows: insertResult.affectedRows,
-          usuariosAntes: beforeCount[0].total,
-          usuariosDespues: afterCount[0].total,
-          usuariosCreados: usuariosCreados
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('💥 ERROR EN REGISTRO SIMPLIFICADO:');
-    console.error('📝 Mensaje:', error.message);
-    console.error('📚 Stack:', error.stack);
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'Error en registro simplificado',
-      debug: {
-        error: error.message,
+  // Limpiar usuarios de prueba
+  app.delete('/debug/limpiar-test', async (req, res) => {
+    try {
+      console.log('🧹 Limpiando usuarios de prueba...');
+      
+      const [result] = await db.execute(`
+        DELETE FROM usuarios 
+        WHERE email LIKE '%test%' 
+        OR email LIKE '%debug%'
+        OR email LIKE '%ejemplo%'
+      `);
+      
+      console.log(`✅ Eliminados ${result.affectedRows} usuarios de prueba`);
+      
+      res.json({
+        status: 'success',
+        message: `${result.affectedRows} usuarios de prueba eliminados`,
+        affected_rows: result.affectedRows,
         timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error('❌ Error limpiando:', error);
+      res.status(500).json({ 
+        status: 'error',
+        error: error.message 
+      });
+    }
+  });
+
+  // Test simple de conexión
+  app.get('/debug/test-connection', async (req, res) => {
+    try {
+      const [result] = await db.execute('SELECT 1 as test, NOW() as timestamp');
+      
+      res.json({
+        status: 'success',
+        message: 'Conexión a base de datos exitosa',
+        result: result[0]
+      });
+      
+    } catch (error) {
+      res.status(500).json({ 
+        status: 'error',
+        error: error.message 
+      });
+    }
+  });
+
+  // Registro simplificado para debug
+  app.post('/debug/register-simple', async (req, res) => {
+    console.log('\n🧪 ================================');
+    console.log('   REGISTRO SIMPLIFICADO - DEBUG');
+    console.log('🧪 ================================');
+    
+    try {
+      const { nombre, apellido, email, password, rol = 'comprador' } = req.body;
+      
+      console.log('📝 Datos recibidos:', { nombre, apellido, email, rol });
+
+      // Verificar email único
+      console.log('🔍 Verificando email único...');
+      const [existing] = await db.execute('SELECT id, email FROM usuarios WHERE email = ?', [email]);
+      
+      if (existing.length > 0) {
+        console.log('❌ Email ya existe:', existing[0]);
+        return res.status(409).json({
+          status: 'error',
+          message: 'Email ya existe',
+          debug: { existingUser: existing[0] }
+        });
       }
-    });
-  }
-});
+      console.log('✅ Email disponible');
+
+      // Hash de password
+      console.log('🔍 Encriptando password...');
+      const bcrypt = await import('bcrypt');
+      const hashedPassword = await bcrypt.default.hash(password, 10);
+      console.log('✅ Password encriptado');
+
+      // Contar usuarios antes
+      console.log('🔍 Contando usuarios ANTES del insert...');
+      const [beforeCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
+      console.log('📊 Usuarios antes:', beforeCount[0].total);
+
+      // INSERT con máximo detalle
+      console.log('🔍 Ejecutando INSERT...');
+      const insertSQL = `INSERT INTO usuarios (nombre, apellido, email, password, rol) VALUES (?, ?, ?, ?, ?)`;
+      const insertParams = [nombre, apellido, email, hashedPassword, rol];
+      
+      const [insertResult] = await db.execute(insertSQL, insertParams);
+      
+      console.log('✅ INSERT ejecutado:', {
+        insertId: insertResult.insertId,
+        affectedRows: insertResult.affectedRows
+      });
+
+      // Verificar que se insertó
+      console.log('🔍 Verificando inserción...');
+      const [afterCount] = await db.execute('SELECT COUNT(*) as total FROM usuarios');
+      console.log('📊 Usuarios después:', afterCount[0].total);
+      
+      const usuariosCreados = afterCount[0].total - beforeCount[0].total;
+      console.log('📈 Usuarios creados:', usuariosCreados);
+
+      // Recuperar usuario insertado
+      console.log('🔍 Recuperando usuario creado...');
+      const [newUser] = await db.execute('SELECT * FROM usuarios WHERE id = ?', [insertResult.insertId]);
+      
+      if (newUser.length === 0) {
+        throw new Error(`Usuario con ID ${insertResult.insertId} no encontrado después del INSERT`);
+      }
+      
+      console.log('✅ Usuario recuperado:', { id: newUser[0].id, email: newUser[0].email });
+
+      // Generar token simple
+      console.log('🔍 Generando token...');
+      const jwt = await import('jsonwebtoken');
+      const token = jwt.default.sign(
+        { id: insertResult.insertId, email }, 
+        process.env.JWT_SECRET || 'default_secret', 
+        { expiresIn: '1h' }
+      );
+      console.log('✅ Token generado');
+
+      console.log('🎉 REGISTRO COMPLETADO EXITOSAMENTE\n');
+
+      res.status(201).json({
+        status: 'success',
+        message: 'Usuario creado exitosamente con debug',
+        data: {
+          user: {
+            id: newUser[0].id,
+            nombre: newUser[0].nombre,
+            apellido: newUser[0].apellido,
+            email: newUser[0].email,
+            rol: newUser[0].rol
+          },
+          token,
+          debug: {
+            insertId: insertResult.insertId,
+            affectedRows: insertResult.affectedRows,
+            usuariosAntes: beforeCount[0].total,
+            usuariosDespues: afterCount[0].total,
+            usuariosCreados: usuariosCreados
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('💥 ERROR EN REGISTRO SIMPLIFICADO:');
+      console.error('📝 Mensaje:', error.message);
+      console.error('📚 Stack:', error.stack);
+      
+      res.status(500).json({
+        status: 'error',
+        message: 'Error en registro simplificado',
+        debug: {
+          error: error.message,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  });
+
+  console.log('✅ Endpoints de debug configurados');
+}
 
 // =====================================================
 // RUTAS DE UTILIDAD
 // =====================================================
 
 // Test de CORS (solo en desarrollo)
-if (process.env.NODE_ENV === 'development') {
+if (!isProduction) {
   app.get('/test-cors', (req, res) => {
     res.json({
       message: 'CORS funcionando correctamente',
+      environment: 'development',
       origin: req.get('Origin'),
+      api_url: SERVER_CONFIG.API_URL,
       timestamp: new Date().toISOString()
     });
   });
@@ -394,14 +436,13 @@ if (process.env.NODE_ENV === 'development') {
 
 try {
   setupSwagger(app);
-  console.log('📚 Swagger configurado en /api-docs');
+  console.log(`📚 Swagger configurado en ${SERVER_CONFIG.API_URL}/api-docs`);
 } catch (error) {
   console.warn('⚠️ Error configurando Swagger:', error.message);
 }
 
 // =====================================================
 // DOCUMENTACIÓN SWAGGER PARA ENDPOINTS DE SISTEMA
-// Agregar esto a tu index.js después de los endpoints pero antes del errorHandler
 // =====================================================
 
 /**
@@ -417,8 +458,6 @@ try {
  *     description: Gestión de usuarios del sistema
  *   - name: Instituciones
  *     description: Gestión de instituciones y organizaciones
- *   - name: Rifas
- *     description: Gestión de rifas y sorteos (próximamente)
  */
 
 /**
@@ -426,7 +465,7 @@ try {
  * /:
  *   get:
  *     summary: Health check básico del sistema
- *     description: Retorna información básica del estado del servidor y endpoints disponibles
+ *     description: Retorna información básica del estado del servidor con URLs dinámicas
  *     tags: [Sistema]
  *     responses:
  *       200:
@@ -445,344 +484,47 @@ try {
  *                 version:
  *                   type: string
  *                   example: 2.0.0
- *                 timestamp:
- *                   type: string
- *                   format: date-time
  *                 environment:
  *                   type: string
- *                   example: development
- *                 endpoints:
+ *                   example: production
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                 urls:
  *                   type: object
  *                   properties:
- *                     documentation:
+ *                     api:
  *                       type: string
- *                       example: /api-docs
- *                     auth:
+ *                       example: https://apirifas.huelemu.com.ar
+ *                     frontend:
  *                       type: string
- *                       example: /auth
- *                     institutions:
- *                       type: string
- *                       example: /instituciones
- *                     users:
- *                       type: string
- *                       example: /usuarios
+ *                       example: https://rifas.huelemu.com.ar
  */
 
 /**
  * @swagger
- * /health:
+ * /env-info:
  *   get:
- *     summary: Estado detallado del sistema
- *     description: Verifica el estado del servidor, base de datos y recursos del sistema
+ *     summary: Información del entorno actual
+ *     description: Retorna información detallada sobre el entorno de ejecución
  *     tags: [Sistema]
  *     responses:
  *       200:
- *         description: Sistema funcionando correctamente
+ *         description: Información del entorno obtenida exitosamente
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 status:
+ *                 environment:
  *                   type: string
- *                   example: OK
- *                 database:
+ *                   example: production
+ *                 api_url:
  *                   type: string
- *                   example: Connected
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *                 uptime:
- *                   type: number
- *                   description: Tiempo de funcionamiento en segundos
- *                   example: 3600.5
- *                 memory:
- *                   type: object
- *                   properties:
- *                     rss:
- *                       type: number
- *                     heapTotal:
- *                       type: number
- *                     heapUsed:
- *                       type: number
- *                     external:
- *                       type: number
- *       500:
- *         description: Error en el sistema
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: ERROR
- *                 error:
- *                   type: string
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- */
-
-/**
- * @swagger
- * /test-db:
- *   get:
- *     summary: Test detallado de conexión a base de datos
- *     description: Verifica conectividad, versión y estado de las tablas principales
- *     tags: [Sistema]
- *     responses:
- *       200:
- *         description: Base de datos funcionando correctamente
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: OK
- *                 conexion:
- *                   type: integer
- *                   example: 1
- *                 base_datos:
- *                   type: string
- *                   example: rifas_solidarias_nuevo
- *                 version:
- *                   type: string
- *                   example: 10.6.16-MariaDB
- *                 total_tablas:
- *                   type: integer
- *                   example: 12
- *                 total_usuarios:
- *                   type: integer
- *                   example: 8
- *                 total_instituciones:
- *                   type: integer
- *                   example: 4
- *                 tablas:
- *                   type: array
- *                   items:
- *                     type: string
- *                   example: ["usuarios", "instituciones", "rifas", "auth_logs"]
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *       500:
- *         description: Error de conexión a base de datos
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: ERROR
- *                 error:
- *                   type: string
- *                 codigo:
- *                   type: string
- */
-
-/**
- * @swagger
- * /debug/usuarios:
- *   get:
- *     summary: Diagnóstico de usuarios (solo desarrollo)
- *     description: Muestra estadísticas y últimos usuarios creados para debugging
- *     tags: [Debug]
- *     responses:
- *       200:
- *         description: Diagnóstico completado exitosamente
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *                 data:
- *                   type: object
- *                   properties:
- *                     total_usuarios:
- *                       type: integer
- *                       example: 8
- *                     ultimos_usuarios:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                           nombre:
- *                             type: string
- *                           apellido:
- *                             type: string
- *                           email:
- *                             type: string
- *                           rol:
- *                             type: string
- *                           fecha_creacion:
- *                             type: string
- *                             format: date-time
- *                     usuarios_test:
- *                       type: array
- *                       items:
- *                         type: object
- */
-
-/**
- * @swagger
- * /debug/limpiar-test:
- *   delete:
- *     summary: Limpiar usuarios de prueba (solo desarrollo)
- *     description: Elimina todos los usuarios de testing y debug de la base de datos
- *     tags: [Debug]
- *     responses:
- *       200:
- *         description: Usuarios de prueba eliminados exitosamente
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: 3 usuarios de prueba eliminados
- *                 affected_rows:
- *                   type: integer
- *                   example: 3
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- */
-
-/**
- * @swagger
- * /debug/test-connection:
- *   get:
- *     summary: Test simple de conexión (solo desarrollo)
- *     description: Verifica conexión básica a la base de datos
- *     tags: [Debug]
- *     responses:
- *       200:
- *         description: Conexión exitosa
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: Conexión a base de datos exitosa
- *                 result:
- *                   type: object
- *                   properties:
- *                     test:
- *                       type: integer
- *                       example: 1
- *                     timestamp:
- *                       type: string
- *                       format: date-time
- */
-
-/**
- * @swagger
- * /debug/register-simple:
- *   post:
- *     summary: Registro simplificado con debug (solo desarrollo)
- *     description: Endpoint de registro con logs detallados para debugging
- *     tags: [Debug]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - nombre
- *               - apellido
- *               - email
- *               - password
- *             properties:
- *               nombre:
- *                 type: string
- *                 example: Debug
- *               apellido:
- *                 type: string
- *                 example: User
- *               email:
- *                 type: string
- *                 format: email
- *                 example: debug.user@test.com
- *               password:
- *                 type: string
- *                 example: 123456
- *               rol:
- *                 type: string
- *                 enum: [admin_global, admin_institucion, vendedor, comprador]
- *                 default: comprador
- *                 example: comprador
- *     responses:
- *       201:
- *         description: Usuario creado exitosamente con información de debug
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: Usuario creado exitosamente con debug
- *                 data:
- *                   type: object
- *                   properties:
- *                     user:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: integer
- *                         nombre:
- *                           type: string
- *                         apellido:
- *                           type: string
- *                         email:
- *                           type: string
- *                         rol:
- *                           type: string
- *                     token:
- *                       type: string
- *                     debug:
- *                       type: object
- *                       properties:
- *                         insertId:
- *                           type: integer
- *                         affectedRows:
- *                           type: integer
- *                         usuariosAntes:
- *                           type: integer
- *                         usuariosDespues:
- *                           type: integer
- *                         usuariosCreados:
- *                           type: integer
- *       409:
- *         description: Email ya existe
- *       500:
- *         description: Error interno del servidor
- * 
+ *                   example: https://apirifas.huelemu.com.ar
+ *                 debug_available:
+ *                   type: boolean
+ *                   example: false
  */
 
 // =====================================================
@@ -791,24 +533,36 @@ try {
 
 // Middleware para rutas no encontradas
 app.use('*', (req, res) => {
+  const availableEndpoints = [
+    'GET /',
+    'GET /health',
+    'GET /test-db',
+    'GET /env-info',
+    'GET /api-docs',
+    'POST /auth/login',
+    'POST /auth/register',
+    'GET /instituciones',
+    'GET /usuarios'
+  ];
+
+  // Agregar endpoints de debug solo en desarrollo
+  if (!isProduction) {
+    availableEndpoints.push(
+      'GET /debug/usuarios',
+      'POST /debug/register-simple',
+      'GET /test-cors'
+    );
+  }
+
   res.status(404).json({
     status: 'error',
     message: 'Endpoint no encontrado',
     path: req.originalUrl,
     method: req.method,
+    environment: SERVER_CONFIG.ENVIRONMENT,
+    api_url: SERVER_CONFIG.API_URL,
     timestamp: new Date().toISOString(),
-    available_endpoints: [
-      'GET /',
-      'GET /health',
-      'GET /test-db',
-      'GET /api-docs',
-      'POST /auth/login',
-      'POST /auth/register',
-      'GET /instituciones',
-      'GET /usuarios',
-      'GET /debug/usuarios',
-      'POST /debug/register-simple'
-    ]
+    available_endpoints: availableEndpoints
   });
 });
 
@@ -835,19 +589,20 @@ async function startServer() {
     app.listen(PORT, () => {
       console.log('\n🎉 =======================================');
       console.log(`   ✅ SERVIDOR INICIADO EXITOSAMENTE`);
-      console.log(`   🌐 URL: http://localhost:${PORT}`);
-      console.log(`   📚 Docs: http://localhost:${PORT}/api-docs`);
-      console.log(`   🏥 Health: http://localhost:${PORT}/health`);
+      console.log(`   🌍 Entorno: ${SERVER_CONFIG.ENVIRONMENT.toUpperCase()}`);
+      console.log(`   🌐 URL: ${SERVER_CONFIG.API_URL}`);
+      console.log(`   📚 Docs: ${SERVER_CONFIG.API_URL}/api-docs`);
+      console.log(`   🏥 Health: ${SERVER_CONFIG.API_URL}/health`);
+      console.log(`   🖥️ Frontend: ${SERVER_CONFIG.FRONTEND_URL}`);
       console.log(`   🗄️ Base de datos: ${process.env.DB_NAME}`);
-      console.log(`   🔧 Ambiente: ${process.env.NODE_ENV || 'development'}`);
       console.log('🎉 =======================================\n');
       
-      if (process.env.NODE_ENV === 'development') {
+      if (!isProduction) {
         console.log('💡 ENDPOINTS DE DEBUG DISPONIBLES:');
-        console.log('   • GET /debug/usuarios - Ver estado de usuarios');
-        console.log('   • DELETE /debug/limpiar-test - Limpiar usuarios de prueba');
-        console.log('   • POST /debug/register-simple - Registro con debug');
-        console.log('   • GET /debug/test-connection - Test de conexión\n');
+        console.log(`   • GET ${SERVER_CONFIG.API_URL}/debug/usuarios`);
+        console.log(`   • DELETE ${SERVER_CONFIG.API_URL}/debug/limpiar-test`);
+        console.log(`   • POST ${SERVER_CONFIG.API_URL}/debug/register-simple`);
+        console.log(`   • GET ${SERVER_CONFIG.API_URL}/test-cors\n`);
       }
     });
     
