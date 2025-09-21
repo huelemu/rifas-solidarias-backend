@@ -54,6 +54,7 @@ export const obtenerInstitucionPorId = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Obtener información básica de la institución
     const [instituciones] = await db.execute(
       'SELECT * FROM instituciones WHERE id = ?',
       [id]
@@ -66,26 +67,51 @@ export const obtenerInstitucionPorId = async (req, res) => {
       });
     }
 
-    // Obtener estadísticas adicionales
-    const [rifasCount] = await db.execute(
-      'SELECT COUNT(*) as total_rifas FROM rifas WHERE institucion_id = ?',
-      [id]
-    );
+    const institucion = instituciones[0];
 
-    const [usuarioCount] = await db.execute(
-      'SELECT COUNT(*) as total_usuarios FROM usuarios WHERE institucion_id = ?',
-      [id]
-    );
+    // Obtener estadísticas adicionales
+    try {
+      // Contar rifas donde es promotora
+      const [rifasPromotas] = await db.execute(
+        'SELECT COUNT(*) as total_rifas_promotoras FROM rifas WHERE institucion_promotora_id = ?',
+        [id]
+      );
+
+      // Contar participaciones en rifas
+      const [rifasParticipantes] = await db.execute(
+        'SELECT COUNT(*) as total_participaciones FROM rifa_participaciones WHERE institucion_id = ? AND estado_participacion = "aprobada"',
+        [id]
+      );
+
+      // Contar usuarios de la institución
+      const [usuarioCount] = await db.execute(
+        'SELECT COUNT(*) as total_usuarios FROM usuarios WHERE institucion_id = ?',
+        [id]
+      );
+
+      // Agregar estadísticas al objeto institución
+      institucion.estadisticas = {
+        total_rifas_promotoras: rifasPromotas[0].total_rifas_promotoras,
+        total_participaciones: rifasParticipantes[0].total_participaciones,
+        total_usuarios: usuarioCount[0].total_usuarios,
+        total_rifas: rifasPromotas[0].total_rifas_promotoras + rifasParticipantes[0].total_participaciones
+      };
+
+    } catch (statsError) {
+      console.warn('Error al obtener estadísticas:', statsError.message);
+      // Si hay error en estadísticas, continuar sin ellas
+      institucion.estadisticas = {
+        total_rifas_promotoras: 0,
+        total_participaciones: 0,
+        total_usuarios: 0,
+        total_rifas: 0,
+        error: 'No se pudieron obtener estadísticas'
+      };
+    }
 
     res.json({
       status: 'success',
-      data: {
-        ...instituciones[0],
-        estadisticas: {
-          total_rifas: rifasCount[0].total_rifas,
-          total_usuarios: usuarioCount[0].total_usuarios
-        }
-      }
+      data: institucion
     });
 
   } catch (error) {
@@ -107,20 +133,11 @@ export const crearInstitucion = async (req, res) => {
     if (!nombre || !email) {
       return res.status(400).json({
         status: 'error',
-        message: 'Nombre y email son campos obligatorios'
+        message: 'Nombre y email son obligatorios'
       });
     }
 
-    // Validar formato de email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Formato de email inválido'
-      });
-    }
-
-    // Verificar que el email no esté en uso
+    // Verificar que el email no exista
     const [existingEmail] = await db.execute(
       'SELECT id FROM instituciones WHERE email = ?',
       [email]
@@ -133,18 +150,10 @@ export const crearInstitucion = async (req, res) => {
       });
     }
 
-    // Insertar nueva institución (convertir undefined a null)
+    // Insertar nueva institución
     const [result] = await db.execute(
-      `INSERT INTO instituciones (nombre, descripcion, direccion, telefono, email, logo_url) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        nombre, 
-        descripcion || null, 
-        direccion || null, 
-        telefono || null, 
-        email, 
-        logo_url || null
-      ]
+      'INSERT INTO instituciones (nombre, descripcion, direccion, telefono, email, logo_url, estado) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [nombre, descripcion || null, direccion || null, telefono || null, email, logo_url || null, 'activa']
     );
 
     // Obtener la institución creada
@@ -177,7 +186,7 @@ export const actualizarInstitucion = async (req, res) => {
 
     // Verificar que la institución existe
     const [instituciones] = await db.execute(
-      'SELECT * FROM instituciones WHERE id = ?',
+      'SELECT id FROM instituciones WHERE id = ?',
       [id]
     );
 
@@ -188,17 +197,8 @@ export const actualizarInstitucion = async (req, res) => {
       });
     }
 
-    // Validaciones
+    // Si se está actualizando el email, verificar que no exista
     if (email) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Formato de email inválido'
-        });
-      }
-
-      // Verificar que el email no esté en uso por otra institución
       const [existingEmail] = await db.execute(
         'SELECT id FROM instituciones WHERE email = ? AND id != ?',
         [email, id]
@@ -207,45 +207,61 @@ export const actualizarInstitucion = async (req, res) => {
       if (existingEmail.length > 0) {
         return res.status(409).json({
           status: 'error',
-          message: 'Ya existe otra institución con ese email'
+          message: 'Ya existe una institución con ese email'
         });
       }
     }
 
-    if (estado && !['activa', 'inactiva'].includes(estado)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Estado debe ser "activa" o "inactiva"'
-      });
+    // Construir query de actualización dinámicamente
+    const updateFields = [];
+    const updateValues = [];
+
+    if (nombre !== undefined) {
+      updateFields.push('nombre = ?');
+      updateValues.push(nombre);
+    }
+    if (descripcion !== undefined) {
+      updateFields.push('descripcion = ?');
+      updateValues.push(descripcion);
+    }
+    if (direccion !== undefined) {
+      updateFields.push('direccion = ?');
+      updateValues.push(direccion);
+    }
+    if (telefono !== undefined) {
+      updateFields.push('telefono = ?');
+      updateValues.push(telefono);
+    }
+    if (email !== undefined) {
+      updateFields.push('email = ?');
+      updateValues.push(email);
+    }
+    if (logo_url !== undefined) {
+      updateFields.push('logo_url = ?');
+      updateValues.push(logo_url);
+    }
+    if (estado !== undefined) {
+      updateFields.push('estado = ?');
+      updateValues.push(estado);
     }
 
-    // Construir query de actualización dinámicamente
-    const campos = [];
-    const valores = [];
-
-    if (nombre !== undefined) { campos.push('nombre = ?'); valores.push(nombre); }
-    if (descripcion !== undefined) { campos.push('descripcion = ?'); valores.push(descripcion); }
-    if (direccion !== undefined) { campos.push('direccion = ?'); valores.push(direccion); }
-    if (telefono !== undefined) { campos.push('telefono = ?'); valores.push(telefono); }
-    if (email !== undefined) { campos.push('email = ?'); valores.push(email); }
-    if (logo_url !== undefined) { campos.push('logo_url = ?'); valores.push(logo_url); }
-    if (estado !== undefined) { campos.push('estado = ?'); valores.push(estado); }
-
-    if (campos.length === 0) {
+    if (updateFields.length === 0) {
       return res.status(400).json({
         status: 'error',
         message: 'No se proporcionaron campos para actualizar'
       });
     }
 
-    valores.push(id);
+    // Agregar ID al final de los valores
+    updateValues.push(id);
 
+    // Ejecutar actualización
     await db.execute(
-      `UPDATE instituciones SET ${campos.join(', ')} WHERE id = ?`,
-      valores
+      `UPDATE instituciones SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateValues
     );
 
-    // Obtener la institución actualizada
+    // Obtener institución actualizada
     const [institucionActualizada] = await db.execute(
       'SELECT * FROM instituciones WHERE id = ?',
       [id]
@@ -274,7 +290,7 @@ export const eliminarInstitucion = async (req, res) => {
 
     // Verificar que la institución existe
     const [instituciones] = await db.execute(
-      'SELECT * FROM instituciones WHERE id = ?',
+      'SELECT id FROM instituciones WHERE id = ?',
       [id]
     );
 
@@ -285,22 +301,37 @@ export const eliminarInstitucion = async (req, res) => {
       });
     }
 
-    // Verificar si tiene rifas asociadas
-    const [rifasAsociadas] = await db.execute(
-      'SELECT COUNT(*) as total FROM rifas WHERE institucion_id = ?',
+    // Verificar que no tenga rifas asociadas (como promotora)
+    const [rifasPromotas] = await db.execute(
+      'SELECT COUNT(*) as total FROM rifas WHERE institucion_promotora_id = ?',
       [id]
     );
 
-    if (rifasAsociadas[0].total > 0) {
+    if (rifasPromotas[0].total > 0) {
       return res.status(400).json({
         status: 'error',
-        message: `No se puede eliminar la institución. Tiene ${rifasAsociadas[0].total} rifas asociadas`,
-        suggestion: 'Cambia el estado a "inactiva" en su lugar'
+        message: 'No se puede eliminar la institución porque tiene rifas asociadas como promotora'
       });
     }
 
-    // Eliminar la institución
-    await db.execute('DELETE FROM instituciones WHERE id = ?', [id]);
+    // Verificar que no tenga participaciones en rifas activas
+    const [participaciones] = await db.execute(
+      'SELECT COUNT(*) as total FROM rifa_participaciones rp JOIN rifas r ON rp.rifa_id = r.id WHERE rp.institucion_id = ? AND r.estado IN ("activa", "borrador")',
+      [id]
+    );
+
+    if (participaciones[0].total > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No se puede eliminar la institución porque tiene participaciones en rifas activas'
+      });
+    }
+
+    // Realizar eliminación (soft delete cambiando estado)
+    await db.execute(
+      'UPDATE instituciones SET estado = "inactiva" WHERE id = ?',
+      [id]
+    );
 
     res.json({
       status: 'success',
