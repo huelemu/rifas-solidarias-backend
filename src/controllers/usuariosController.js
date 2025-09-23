@@ -2,27 +2,127 @@
 import db from '../config/db.js';
 import bcrypt from 'bcrypt';
 
-// GET /usuarios - Obtener todos los usuarios
+// GET /usuarios - Obtener todos los usuarios CON FILTROS
 export const obtenerUsuarios = async (req, res) => {
   try {
-    const [usuarios] = await db.execute(`
+    console.log('📋 Controlador usuarios: Query params recibidos:', req.query);
+    
+    // Extraer parámetros de query
+    const { 
+      page = 1, 
+      limit = 10, 
+      rol, 
+      estado, 
+      institucion_id,
+      search 
+    } = req.query;
+    
+    const offset = (page - 1) * limit;
+    const usuario = req.user;
+
+    // Construir query dinámicamente
+    let whereConditions = [];
+    let params = [];
+
+    // Filtro por rol
+    if (rol) {
+      whereConditions.push('u.rol = ?');
+      params.push(rol);
+      console.log('👥 Aplicando filtro rol:', rol);
+    }
+
+    // Filtro por estado
+    if (estado) {
+      whereConditions.push('u.estado = ?');
+      params.push(estado);
+      console.log('📊 Aplicando filtro estado:', estado);
+    }
+
+    // Filtro por institución
+    if (institucion_id) {
+      whereConditions.push('u.institucion_id = ?');
+      params.push(institucion_id);
+      console.log('🏢 Aplicando filtro institucion_id:', institucion_id);
+    }
+
+    // Búsqueda por texto en nombre, apellido o email
+    if (search) {
+      whereConditions.push('(u.nombre LIKE ? OR u.apellido LIKE ? OR u.email LIKE ?)');
+      const searchTerm = `%${search}%`;
+      params.push(searchTerm, searchTerm, searchTerm);
+      console.log('🔍 Aplicando filtro search:', search);
+    }
+
+    // Restricciones según el rol del usuario autenticado
+    if (usuario.rol === 'admin_institucion') {
+      // Admin de institución solo ve usuarios de su institución
+      whereConditions.push('u.institucion_id = ?');
+      params.push(usuario.institucion_id);
+      console.log('🔒 Restringiendo por institución del admin:', usuario.institucion_id);
+    }
+    // admin_global puede ver todos los usuarios (sin restricción adicional)
+
+    // Construir la cláusula WHERE
+    const whereClause = whereConditions.length > 0 
+      ? 'WHERE ' + whereConditions.join(' AND ') 
+      : '';
+
+    console.log('🔧 Query WHERE construido:', whereClause);
+    console.log('📋 Parámetros finales:', params);
+
+    // Query principal con filtros
+    const mainQuery = `
       SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
-             u.rol, u.estado, u.fecha_creacion,
-             i.nombre as institucion_nombre
+             u.rol, u.estado, u.fecha_creacion, u.ultimo_login,
+             i.nombre as institucion_nombre, i.id as institucion_id
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
+      ${whereClause}
       ORDER BY u.fecha_creacion DESC
-      LIMIT 20
-    `);
+      LIMIT ? OFFSET ?
+    `;
+
+    // Query para contar total (sin LIMIT)
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM usuarios u
+      LEFT JOIN instituciones i ON u.institucion_id = i.id
+      ${whereClause}
+    `;
+
+    console.log('📊 Ejecutando query principal...');
+    // Ejecutar ambas consultas
+    const [usuarios] = await db.execute(mainQuery, [...params, parseInt(limit), parseInt(offset)]);
+    
+    console.log('📊 Ejecutando query de conteo...');
+    const [totalResult] = await db.execute(countQuery, params);
+    
+    const total = totalResult[0].total;
+    const totalPages = Math.ceil(total / limit);
+
+    console.log(`✅ Usuarios encontrados: ${usuarios.length} de ${total} total`);
 
     res.json({
       status: 'success',
-      total: usuarios.length,
-      data: usuarios
+      data: usuarios,
+      pagination: {
+        current_page: parseInt(page),
+        total_pages: totalPages,
+        total_records: total,
+        per_page: parseInt(limit),
+        has_next_page: parseInt(page) < totalPages,
+        has_prev_page: parseInt(page) > 1
+      },
+      filters_applied: {
+        rol: rol || null,
+        estado: estado || null,
+        institucion_id: institucion_id || null,
+        search: search || null
+      }
     });
 
   } catch (error) {
-    console.error('Error al obtener usuarios:', error);
+    console.error('❌ Error al obtener usuarios:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error interno del servidor',
