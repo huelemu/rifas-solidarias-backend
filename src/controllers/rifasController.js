@@ -6,6 +6,17 @@
 import db from '../config/db.js'; // ✅ CORREGIDO: import como default
 import { body, validationResult } from 'express-validator';
 
+// Función para generar números únicos para la rifa
+function generarNumerosRifa(cantidad) {
+  const numeros = new Set();
+  while (numeros.size < cantidad) {
+    const numero = Math.floor(Math.random() * 10000); // ajusta rango si querés
+    numeros.add(numero);
+  }
+  return Array.from(numeros);
+}
+
+
 const rifasController = {
 
   // =====================================================
@@ -196,98 +207,105 @@ const rifasController = {
   },
 
   // Crear nueva rifa
-  async crearRifa(req, res) {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Datos inválidos',
-          errors: errors.array()
-        });
-      }
+async crearRifa(req, res) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Datos inválidos',
+        errors: errors.array()
+      });
+    }
 
-      const {
-        nombre,
-        descripcion,
-        cantidad_numeros,
-        precio_numero,
-        fecha_inicio,
-        fecha_fin,
-        fecha_sorteo,
-        institucion_promotora_id,
-        imagen_url,
-        reglas_adicionales
-      } = req.body;
+    const {
+      nombre,
+      descripcion,
+      cantidad_numeros,
+      precio_numero,
+      fecha_inicio,
+      fecha_fin,
+      fecha_sorteo,
+      institucion_promotora_id,
+      imagen_url,
+      reglas_adicionales
+    } = req.body;
 
-      const creado_por = req.user.id;
+    const creado_por = req.user.id;
 
-      // Validaciones de negocio
-      if (new Date(fecha_inicio) >= new Date(fecha_fin)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'La fecha de inicio debe ser anterior a la fecha de fin'
-        });
-      }
+    // Validaciones de negocio
+    if (new Date(fecha_inicio) >= new Date(fecha_fin)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'La fecha de inicio debe ser anterior a la fecha de fin'
+      });
+    }
 
-      if (new Date(fecha_sorteo) <= new Date(fecha_fin)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'La fecha de sorteo debe ser posterior a la fecha de fin'
-        });
-      }
+    if (fecha_sorteo && new Date(fecha_sorteo) <= new Date(fecha_fin)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'La fecha de sorteo debe ser posterior a la fecha de fin'
+      });
+    }
 
-      // Verificar permisos de institución
-      if (req.user.rol !== 'admin_global' && req.user.institucion_id !== institucion_promotora_id) {
-        return res.status(403).json({
-          status: 'error',
-          message: 'No tienes permisos para crear rifas para esta institución'
-        });
-      }
+    if (req.user.rol !== 'admin_global' && req.user.institucion_id !== institucion_promotora_id) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'No tienes permisos para crear rifas para esta institución'
+      });
+    }
 
-      const insertQuery = `
-        INSERT INTO rifas (
-          nombre, descripcion, cantidad_numeros, precio_numero,
-          fecha_inicio, fecha_fin, fecha_sorteo,
-          institucion_promotora_id, creado_por, imagen_url, reglas_adicionales
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
-      const [result] = await db.execute(insertQuery, [
+    const insertQuery = `
+      INSERT INTO rifas (
         nombre, descripcion, cantidad_numeros, precio_numero,
         fecha_inicio, fecha_fin, fecha_sorteo,
         institucion_promotora_id, creado_por, imagen_url, reglas_adicionales
-      ]);
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
 
-      const rifa_id = result.insertId;
+    const [result] = await db.execute(insertQuery, [
+      nombre ?? null,
+      descripcion ?? null,
+      cantidad_numeros ?? null,
+      precio_numero ?? null,
+      fecha_inicio ?? null,
+      fecha_fin ?? null,
+      fecha_sorteo ?? null,
+      institucion_promotora_id ?? null,
+      creado_por ?? null,
+      imagen_url ?? null,
+      reglas_adicionales ?? null
+    ]);
 
-      // Generar números automáticamente
-      await this.generarNumerosRifa(rifa_id, cantidad_numeros);
+    const rifa_id = result.insertId;
 
-      // Obtener la rifa creada
-      const [rifaCreada] = await db.execute(`
-        SELECT r.*, i.nombre as institucion_nombre
-        FROM rifas r
-        LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
-        WHERE r.id = ?
-      `, [rifa_id]);
+    // ✅ CORRECCIÓN: llamar al método desde rifasController
+    await rifasController.generarNumerosRifa(rifa_id, cantidad_numeros);
 
-      res.status(201).json({
-        status: 'success',
-        message: 'Rifa creada exitosamente',
-        data: rifaCreada[0]
-      });
+    const [rifaCreada] = await db.execute(`
+      SELECT r.*, i.nombre as institucion_nombre
+      FROM rifas r
+      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+      WHERE r.id = ?
+    `, [rifa_id]);
 
-    } catch (error) {
-      console.error('Error al crear rifa:', error);
-      res.status(500).json({
-        status: 'error',
-        message: 'Error interno del servidor'
-      });
-    }
-  },
+    res.status(201).json({
+      status: 'success',
+      message: 'Rifa creada exitosamente',
+      data: rifaCreada[0]
+    });
 
-  // Actualizar rifa
+  } catch (error) {
+    console.error('Error al crear rifa:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+},
+
+// Actualizar rifa
   async actualizarRifa(req, res) {
     try {
       const errors = validationResult(req);

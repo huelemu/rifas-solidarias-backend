@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import { body, param, query } from 'express-validator';
-import rifasController, { rifasValidations } from '../controllers/rifasController.js';
+import rifasController ,{ rifasValidations } from '../controllers/rifasController.js';
 import { requireAuth, requireRole, requireOwnership } from '../middleware/auth.js';
 import db from '../config/db.js'; // ✅ CORREGIDO: import como default
 
