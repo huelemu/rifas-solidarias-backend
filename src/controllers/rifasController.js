@@ -42,7 +42,10 @@ const rifasController = {
       let queryParams = [];
 
       // Construir condiciones WHERE dinámicamente
-      if (estado) {
+      // Filtrar solo estados válidos
+      const estadosValidos = ['borrador', 'activa', 'finalizada', 'cerrada', 'cancelada'];
+
+      if (estado && estadosValidos.includes(estado)) {
         whereConditions.push('r.estado = ?');
         queryParams.push(estado);
       }
@@ -963,32 +966,34 @@ async crearRifa(req, res) {
   // =====================================================
 
   // Generar números automáticamente para una rifa
-  async generarNumerosRifa(rifa_id, cantidad_numeros) {
-    try {
-      const numeros = [];
-      for (let i = 1; i <= cantidad_numeros; i++) {
-        numeros.push([rifa_id, i]);
-      }
-
-      // Insertar en lotes para mejor performance
-      const batchSize = 1000;
-      for (let i = 0; i < numeros.length; i += batchSize) {
-        const batch = numeros.slice(i, i + batchSize);
-        const placeholders = batch.map(() => '(?, ?)').join(', ');
-        const values = batch.flat();
-        
-        await db.execute(`
-          INSERT INTO numeros_rifa (rifa_id, numero) 
-          VALUES ${placeholders}
-        `, values);
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error al generar números:', error);
-      throw error;
+async generarNumerosRifa(rifa_id, cantidad_numeros) {
+  try {
+    const numeros = [];
+    for (let i = 1; i <= cantidad_numeros; i++) {
+      // GENERAR QR_CODE ÚNICO
+      const qrCode = `RIFA${rifa_id}-${String(i).padStart(6, '0')}-${Date.now()}`;
+      numeros.push([rifa_id, i, qrCode]); // Incluir qr_code
     }
-  },
+
+    // Insertar en lotes para mejor performance
+    const batchSize = 1000;
+    for (let i = 0; i < numeros.length; i += batchSize) {
+      const batch = numeros.slice(i, i + batchSize);
+      const placeholders = batch.map(() => '(?, ?, ?)').join(', '); // 3 parámetros ahora
+      const values = batch.flat();
+      
+      await db.execute(`
+        INSERT INTO numeros_rifa (rifa_id, numero, qr_code) 
+        VALUES ${placeholders}
+      `, values);
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error al generar números:', error);
+    throw error;
+  }
+},
 
   // Asignar números a instituciones
   async asignarNumerosInstitucion(req, res) {
