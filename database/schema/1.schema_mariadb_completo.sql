@@ -273,6 +273,33 @@ CREATE TABLE instituciones_config_rifas (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
+-- . TABLA transacciones de ventas de numeros
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS transacciones (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  rifa_id INT NOT NULL,
+  comprador_id INT NOT NULL,
+  numeros_comprados JSON NOT NULL,
+  cantidad_numeros INT NOT NULL,
+  precio_unitario DECIMAL(10,2) NOT NULL,
+  total_pagado DECIMAL(10,2) NOT NULL,
+  metodo_pago VARCHAR(50) NOT NULL DEFAULT 'efectivo',
+  estado ENUM('pendiente', 'completada', 'cancelada') DEFAULT 'completada',
+  referencia_pago VARCHAR(100) NULL,
+  fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  
+  FOREIGN KEY (rifa_id) REFERENCES rifas(id) ON DELETE CASCADE,
+  FOREIGN KEY (comprador_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+  
+  INDEX idx_transacciones_rifa (rifa_id),
+  INDEX idx_transacciones_comprador (comprador_id),
+  INDEX idx_transacciones_fecha (fecha_creacion)
+);
+
+
+-- =====================================================
 -- 10. TABLAS DE AUTENTICACIÓN Y SEGURIDAD
 -- =====================================================
 
