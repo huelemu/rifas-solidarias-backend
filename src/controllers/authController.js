@@ -1,14 +1,16 @@
 // =====================================================
-// CONTROLLER DE AUTENTICACIÓN CORREGIDO
+// CONTROLLER DE AUTENTICACIÓN COMPLETO
 // src/controllers/authController.js
 // =====================================================
 
 import db from '../config/db.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { getGoogleAuthUrl, getGoogleUserInfo } from '../config/google.js';
+import emailService from '../services/emailService.js';
 
 // =====================================================
-// REGISTER - FUNCIÓN CORREGIDA
+// REGISTRO CON VERIFICACIÓN DE EMAIL
 // =====================================================
 
 export const register = async (req, res) => {
@@ -24,12 +26,8 @@ export const register = async (req, res) => {
 
     console.log('📝 Datos recibidos:', { nombre, apellido, email, rol, institucion_id });
 
-    // =====================================================
-    // VALIDACIONES BÁSICAS
-    // =====================================================
-    
+    // Validaciones básicas
     if (!nombre || !apellido || !email || !password) {
-      console.log('❌ Validación falló: campos requeridos faltantes');
       return res.status(400).json({
         status: 'error',
         message: 'Nombre, apellido, email y contraseña son requeridos'
@@ -39,7 +37,6 @@ export const register = async (req, res) => {
     // Validar formato de email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      console.log('❌ Validación falló: email inválido');
       return res.status(400).json({
         status: 'error',
         message: 'Formato de email inválido'
@@ -48,146 +45,74 @@ export const register = async (req, res) => {
 
     // Validar contraseña
     if (password.length < 6) {
-      console.log('❌ Validación falló: password muy corto');
       return res.status(400).json({
         status: 'error',
         message: 'La contraseña debe tener al menos 6 caracteres'
       });
     }
 
-    // Validar rol
-    const rolesValidos = ['admin_global', 'admin_institucion', 'vendedor', 'comprador'];
-    if (!rolesValidos.includes(rol)) {
-      console.log('❌ Validación falló: rol inválido');
-      return res.status(400).json({
-        status: 'error',
-        message: 'Rol inválido'
-      });
-    }
-
-    console.log('✅ Validaciones pasaron');
-
-    // =====================================================
-    // VERIFICAR EMAIL ÚNICO
-    // =====================================================
-    
-    console.log('🔍 Verificando email único...');
+    // Verificar email único
     const [existingUser] = await db.execute(
       'SELECT id, email FROM usuarios WHERE email = ?',
       [email]
     );
 
     if (existingUser.length > 0) {
-      console.log('❌ Email ya existe:', existingUser[0]);
       return res.status(409).json({
         status: 'error',
         message: 'Ya existe un usuario con ese email'
       });
     }
 
-    console.log('✅ Email disponible');
-
-    // =====================================================
-    // VERIFICAR INSTITUCIÓN (SI SE ESPECIFICA)
-    // =====================================================
-    
+    // Verificar institución si se especifica
     if (institucion_id) {
-      console.log('🔍 Verificando institución...', institucion_id);
       const [institucion] = await db.execute(
         'SELECT id, nombre FROM instituciones WHERE id = ? AND estado = "activa"',
         [institucion_id]
       );
 
       if (institucion.length === 0) {
-        console.log('❌ Institución no válida');
         return res.status(400).json({
           status: 'error',
           message: 'Institución no válida'
         });
       }
-      console.log('✅ Institución válida:', institucion[0].nombre);
     }
 
-    // =====================================================
-    // ENCRIPTAR CONTRASEÑA
-    // =====================================================
-    
-    console.log('🔐 Encriptando contraseña...');
+    // Encriptar contraseña
     const hashedPassword = await bcrypt.hash(password, 12);
-    console.log('✅ Contraseña encriptada');
 
-    // =====================================================
-    // INSERTAR USUARIO
-    // =====================================================
-    
-    console.log('💾 Insertando usuario en base de datos...');
-    
+    // Insertar usuario
     const [result] = await db.execute(`
-      INSERT INTO usuarios (nombre, apellido, email, password, telefono, dni, rol, institucion_id) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usuarios (nombre, apellido, email, password, telefono, dni, rol, institucion_id, email_verificado) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE)
     `, [nombre, apellido, email, hashedPassword, telefono || null, dni || null, rol, institucion_id || null]);
 
-    console.log('✅ Usuario insertado con ID:', result.insertId);
+    const userId = result.insertId;
+    console.log('✅ Usuario creado con ID:', userId);
 
-    // =====================================================
-    // OBTENER USUARIO CREADO CON INFORMACIÓN COMPLETA
-    // =====================================================
-    
-    console.log('🔍 Obteniendo usuario creado...');
+    // Enviar email de verificación
+    try {
+      await emailService.sendVerificationEmail(email, nombre, userId);
+    } catch (emailError) {
+      console.error('⚠️ Error enviando email de verificación:', emailError);
+      // No fallar el registro si el email falla
+    }
+
+    // Obtener usuario creado
     const [nuevoUsuario] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, 
+      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, u.email_verificado,
              u.institucion_id, i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
       WHERE u.id = ?
-    `, [result.insertId]);
-
-    if (nuevoUsuario.length === 0) {
-      throw new Error('No se pudo recuperar el usuario creado');
-    }
+    `, [userId]);
 
     const usuario = nuevoUsuario[0];
-    console.log('✅ Usuario recuperado:', { id: usuario.id, email: usuario.email, rol: usuario.rol });
 
-    // =====================================================
-    // GENERAR TOKENS
-    // =====================================================
-    
-    console.log('🔑 Generando tokens...');
-    
-    // Crear payload para tokens
-    const tokenPayload = {
-      id: usuario.id,
-      email: usuario.email,
-      rol: usuario.rol,
-      institucion_id: usuario.institucion_id
-    };
-
-    // Generar access token
-    const accessToken = jwt.sign(
-      tokenPayload, 
-      process.env.JWT_SECRET, 
-      { expiresIn: '15m' }
-    );
-
-    // Generar refresh token
-    const refreshToken = jwt.sign(
-      { id: usuario.id }, 
-      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, 
-      { expiresIn: '7d' }
-    );
-
-    console.log('✅ Tokens generados exitosamente');
-
-    // =====================================================
-    // RESPUESTA EXITOSA
-    // =====================================================
-    
-    console.log('🎉 REGISTRO COMPLETADO EXITOSAMENTE\n');
-    
     res.status(201).json({
       status: 'success',
-      message: 'Usuario registrado exitosamente',
+      message: 'Usuario registrado exitosamente. Por favor verifica tu email.',
       data: {
         user: {
           id: usuario.id,
@@ -195,23 +120,17 @@ export const register = async (req, res) => {
           apellido: usuario.apellido,
           email: usuario.email,
           rol: usuario.rol,
-          institucion_id: usuario.institucion_id,
-          institucion_nombre: usuario.institucion_nombre || null
-        },
-        tokens: {
-          accessToken,
-          refreshToken,
-          expiresIn: '15m',
-          tokenType: 'Bearer'
+          email_verificado: usuario.email_verificado,
+          institucion: usuario.institucion_id ? {
+            id: usuario.institucion_id,
+            nombre: usuario.institucion_nombre
+          } : null
         }
       }
     });
 
   } catch (error) {
-    console.error('💥 ERROR EN REGISTER:');
-    console.error('📝 Mensaje:', error.message);
-    console.error('📚 Stack:', error.stack);
-    
+    console.error('❌ Error en registro:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error interno del servidor'
@@ -220,18 +139,12 @@ export const register = async (req, res) => {
 };
 
 // =====================================================
-// LOGIN - FUNCIÓN MEJORADA
+// LOGIN CON VERIFICACIÓN DE EMAIL
 // =====================================================
 
 export const login = async (req, res) => {
-  console.log('\n🔑 ================================');
-  console.log('   LOGIN DE USUARIO');
-  console.log('🔑 ================================');
-  
   try {
     const { email, password } = req.body;
-
-    console.log('📝 Intento de login para:', email);
 
     if (!email || !password) {
       return res.status(400).json({
@@ -240,11 +153,10 @@ export const login = async (req, res) => {
       });
     }
 
-    // Buscar usuario por email con información completa
-    console.log('🔍 Buscando usuario...');
+    // Buscar usuario
     const [usuarios] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.password, u.rol, 
-             u.estado, u.institucion_id, u.intentos_fallidos, u.bloqueado_hasta,
+             u.estado, u.email_verificado, u.institucion_id, u.google_id,
              i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -252,7 +164,6 @@ export const login = async (req, res) => {
     `, [email]);
 
     if (usuarios.length === 0) {
-      console.log('❌ Usuario no encontrado');
       return res.status(401).json({
         status: 'error',
         message: 'Credenciales inválidas'
@@ -260,34 +171,45 @@ export const login = async (req, res) => {
     }
 
     const usuario = usuarios[0];
-    console.log('✅ Usuario encontrado:', { id: usuario.id, rol: usuario.rol, estado: usuario.estado });
 
     // Verificar estado del usuario
     if (usuario.estado !== 'activo') {
-      console.log('❌ Usuario inactivo');
       return res.status(401).json({
         status: 'error',
         message: 'Usuario inactivo o bloqueado'
       });
     }
 
-    // Verificar contraseña
-    console.log('🔐 Verificando contraseña...');
-    const passwordValida = await bcrypt.compare(password, usuario.password);
-    
-    if (!passwordValida) {
-      console.log('❌ Contraseña inválida');
-      return res.status(401).json({
+    // Si es usuario de Google, redirigir a Google OAuth
+    if (usuario.google_id && !password) {
+      return res.status(400).json({
         status: 'error',
-        message: 'Credenciales inválidas'
+        message: 'Esta cuenta está vinculada con Google. Usa "Iniciar sesión con Google"'
       });
     }
 
-    console.log('✅ Contraseña válida');
+    // Verificar contraseña solo si no es usuario de Google
+    if (!usuario.google_id) {
+      const passwordValida = await bcrypt.compare(password, usuario.password);
+      
+      if (!passwordValida) {
+        return res.status(401).json({
+          status: 'error',
+          message: 'Credenciales inválidas'
+        });
+      }
+    }
+
+    // Verificar email verificado
+    if (!usuario.email_verificado) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Por favor verifica tu email antes de iniciar sesión',
+        code: 'EMAIL_NOT_VERIFIED'
+      });
+    }
 
     // Generar tokens
-    console.log('🔑 Generando tokens...');
-    
     const tokenPayload = {
       id: usuario.id,
       email: usuario.email,
@@ -300,14 +222,10 @@ export const login = async (req, res) => {
 
     // Actualizar último login
     await db.execute(
-      'UPDATE usuarios SET ultimo_login = NOW(), intentos_fallidos = 0 WHERE id = ?',
+      'UPDATE usuarios SET ultimo_login = NOW() WHERE id = ?',
       [usuario.id]
     );
 
-    console.log('✅ Login exitoso para:', usuario.email);
-    console.log('🎉 TOKENS GENERADOS CORRECTAMENTE\n');
-
-    // Respuesta exitosa
     res.json({
       status: 'success',
       message: 'Login exitoso',
@@ -318,20 +236,21 @@ export const login = async (req, res) => {
           apellido: usuario.apellido,
           email: usuario.email,
           rol: usuario.rol,
-          institucion_id: usuario.institucion_id,
-          institucion_nombre: usuario.institucion_nombre
+          email_verificado: usuario.email_verificado,
+          institucion: usuario.institucion_id ? {
+            id: usuario.institucion_id,
+            nombre: usuario.institucion_nombre
+          } : null
         },
         tokens: {
-          accessToken,
-          refreshToken,
-          expiresIn: '15m',
-          tokenType: 'Bearer'
+          access_token: accessToken,
+          refresh_token: refreshToken
         }
       }
     });
 
   } catch (error) {
-    console.error('💥 ERROR EN LOGIN:', error);
+    console.error('❌ Error en login:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error interno del servidor'
@@ -340,23 +259,225 @@ export const login = async (req, res) => {
 };
 
 // =====================================================
-// OBTENER PERFIL - /auth/me
+// VERIFICACIÓN DE EMAIL
 // =====================================================
 
-export const getProfile = async (req, res) => {
+export const verifyEmail = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const { token } = req.body;
 
+    if (!token) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token de verificación requerido'
+      });
+    }
+
+    const result = await emailService.verifyEmailToken(token);
+
+    if (result.success) {
+      res.json({
+        status: 'success',
+        message: result.message,
+        data: {
+          user: result.user
+        }
+      });
+    } else {
+      res.status(400).json({
+        status: 'error',
+        message: result.message
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error verificando email:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+};
+
+// =====================================================
+// REENVIAR VERIFICACIÓN DE EMAIL
+// =====================================================
+
+export const resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Email requerido'
+      });
+    }
+
+    // Buscar usuario
+    const [usuarios] = await db.execute(
+      'SELECT id, nombre, email, email_verificado FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    if (usuarios.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    if (usuario.email_verificado) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'El email ya está verificado'
+      });
+    }
+
+    // Reenviar email de verificación
+    await emailService.sendVerificationEmail(usuario.email, usuario.nombre, usuario.id);
+
+    res.json({
+      status: 'success',
+      message: 'Email de verificación reenviado'
+    });
+
+  } catch (error) {
+    console.error('❌ Error reenviando verificación:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+};
+
+// =====================================================
+// GOOGLE OAUTH - INICIAR PROCESO
+// =====================================================
+
+export const googleAuth = async (req, res) => {
+  try {
+    const authUrl = getGoogleAuthUrl();
+    
+    res.json({
+      status: 'success',
+      data: {
+        authUrl
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error generando URL de Google:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+};
+
+// =====================================================
+// GOOGLE OAUTH - CALLBACK
+// =====================================================
+
+export const googleCallback = async (req, res) => {
+  try {
+    const { code } = req.query;
+
+    if (!code) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Código de autorización requerido'
+      });
+    }
+
+    // Obtener información del usuario desde Google
+    const googleUser = await getGoogleUserInfo(code);
+
+    if (!googleUser.verified_email) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Email de Google no verificado'
+      });
+    }
+
+    // Buscar usuario existente
+    const [existingUsers] = await db.execute(
+      'SELECT * FROM usuarios WHERE email = ? OR google_id = ?',
+      [googleUser.email, googleUser.id]
+    );
+
+    let usuario;
+
+    if (existingUsers.length > 0) {
+      // Usuario existente - actualizar con datos de Google si es necesario
+      usuario = existingUsers[0];
+      
+      if (!usuario.google_id) {
+        await db.execute(
+          'UPDATE usuarios SET google_id = ?, email_verificado = TRUE WHERE id = ?',
+          [googleUser.id, usuario.id]
+        );
+      }
+    } else {
+      // Crear nuevo usuario
+      const [result] = await db.execute(`
+        INSERT INTO usuarios (nombre, apellido, email, google_id, rol, email_verificado, estado) 
+        VALUES (?, ?, ?, ?, 'comprador', TRUE, 'activo')
+      `, [googleUser.nombre, googleUser.apellido || '', googleUser.email, googleUser.id]);
+
+      const [nuevoUsuario] = await db.execute(
+        'SELECT * FROM usuarios WHERE id = ?',
+        [result.insertId]
+      );
+      
+      usuario = nuevoUsuario[0];
+    }
+
+    // Generar tokens
+    const tokenPayload = {
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      institucion_id: usuario.institucion_id
+    };
+
+    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const refreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    // Actualizar último login
+    await db.execute(
+      'UPDATE usuarios SET ultimo_login = NOW() WHERE id = ?',
+      [usuario.id]
+    );
+
+    // Redirigir al frontend con tokens
+    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?access_token=${accessToken}&refresh_token=${refreshToken}`;
+    res.redirect(redirectUrl);
+
+  } catch (error) {
+    console.error('❌ Error en callback de Google:', error);
+    const errorUrl = `${process.env.FRONTEND_URL}/auth/error?message=Error de autenticación`;
+    res.redirect(errorUrl);
+  }
+};
+
+// =====================================================
+// OBTENER INFORMACIÓN DEL USUARIO AUTENTICADO
+// =====================================================
+
+export const getMe = async (req, res) => {
+  try {
     const [usuarios] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.telefono, u.dni, 
-             u.estado, u.ultimo_login, u.institucion_id, 
-             i.nombre as institucion_nombre, i.logo_url as institucion_logo
+      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, 
+             u.email_verificado, u.institucion_id, u.google_id,
+             i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
       WHERE u.id = ?
-    `, [userId]);
+    `, [req.user.id]);
 
-    if (!usuarios.length) {
+    if (usuarios.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'Usuario no encontrado'
@@ -374,21 +495,18 @@ export const getProfile = async (req, res) => {
           apellido: usuario.apellido,
           email: usuario.email,
           rol: usuario.rol,
-          telefono: usuario.telefono,
-          dni: usuario.dni,
-          estado: usuario.estado,
-          ultimo_login: usuario.ultimo_login,
-          institucion: {
+          email_verificado: usuario.email_verificado,
+          google_linked: !!usuario.google_id,
+          institucion: usuario.institucion_id ? {
             id: usuario.institucion_id,
-            nombre: usuario.institucion_nombre,
-            logo: usuario.institucion_logo
-          }
+            nombre: usuario.institucion_nombre
+          } : null
         }
       }
     });
 
   } catch (error) {
-    console.error('Error obteniendo perfil:', error);
+    console.error('❌ Error obteniendo usuario:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error interno del servidor'
@@ -402,9 +520,9 @@ export const getProfile = async (req, res) => {
 
 export const refreshToken = async (req, res) => {
   try {
-    const { refreshToken } = req.body;
+    const { refresh_token } = req.body;
 
-    if (!refreshToken) {
+    if (!refresh_token) {
       return res.status(401).json({
         status: 'error',
         message: 'Refresh token requerido'
@@ -412,38 +530,46 @@ export const refreshToken = async (req, res) => {
     }
 
     // Verificar refresh token
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
-    
+    const decoded = jwt.verify(refresh_token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+
     // Buscar usuario
-    const [usuarios] = await db.execute('SELECT id, email, rol, institucion_id FROM usuarios WHERE id = ?', [decoded.id]);
-    
-    if (!usuarios.length) {
+    const [usuarios] = await db.execute(
+      'SELECT id, email, rol, institucion_id FROM usuarios WHERE id = ? AND estado = "activo"',
+      [decoded.id]
+    );
+
+    if (usuarios.length === 0) {
       return res.status(401).json({
         status: 'error',
-        message: 'Usuario no encontrado'
+        message: 'Usuario no válido'
       });
     }
 
     const usuario = usuarios[0];
 
     // Generar nuevo access token
-    const newAccessToken = jwt.sign({
+    const tokenPayload = {
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
       institucion_id: usuario.institucion_id
-    }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    };
+
+    const newAccessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const newRefreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       status: 'success',
       data: {
-        accessToken: newAccessToken,
-        expiresIn: '15m'
+        tokens: {
+          access_token: newAccessToken,
+          refresh_token: newRefreshToken
+        }
       }
     });
 
   } catch (error) {
-    console.error('Error en refresh token:', error);
+    console.error('❌ Error en refresh:', error);
     res.status(401).json({
       status: 'error',
       message: 'Refresh token inválido'
@@ -457,19 +583,31 @@ export const refreshToken = async (req, res) => {
 
 export const logout = async (req, res) => {
   try {
-    // En una implementación completa, aquí invalidarías el token
-    // Por ahora, solo confirmamos el logout
+    // Aquí puedes agregar lógica para invalidar el refresh token
+    // Por ejemplo, agregarlo a una blacklist en la base de datos
     
     res.json({
       status: 'success',
       message: 'Logout exitoso'
     });
-
   } catch (error) {
-    console.error('Error en logout:', error);
+    console.error('❌ Error en logout:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error interno del servidor'
     });
   }
+};
+
+// Exportar controlador
+export const authController = {
+  register,
+  login,
+  verifyEmail,
+  resendVerification,
+  googleAuth,
+  googleCallback,
+  getMe,
+  refreshToken,
+  logout
 };

@@ -1,211 +1,172 @@
-// src/routes/auth.js
+// =====================================================
+// RUTAS DE AUTENTICACIÓN MEJORADAS
+// src/routes/authRoutes.js
+// =====================================================
+
 import express from 'express';
-import { 
-  register, 
-  login, 
-  refreshToken, 
-  logout, 
-  getProfile 
-} from '../controllers/authController.js';
+import jwt from 'jsonwebtoken';
+import db from '../config/db.js';
+import { authController } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
-/**
- * @swagger
- * components:
- *   schemas:
- *     LoginRequest:
- *       type: object
- *       required:
- *         - email
- *         - password
- *       properties:
- *         email:
- *           type: string
- *           format: email
- *           example: usuario@ejemplo.com
- *         password:
- *           type: string
- *           example: mipassword123
- *     
- *     RegisterRequest:
- *       type: object
- *       required:
- *         - nombre
- *         - apellido
- *         - email
- *         - password
- *       properties:
- *         nombre:
- *           type: string
- *           example: Juan
- *         apellido:
- *           type: string
- *           example: Pérez
- *         email:
- *           type: string
- *           format: email
- *           example: juan.perez@ejemplo.com
- *         password:
- *           type: string
- *           minLength: 6
- *           example: password123
- *         telefono:
- *           type: string
- *           example: "+5491123456789"
- *         dni:
- *           type: string
- *           example: "12345678"
- *         rol:
- *           type: string
- *           enum: [admin_global, admin_institucion, vendedor, comprador]
- *           default: comprador
- *         institucion_id:
- *           type: integer
- *           example: 1
- *     
- *     AuthResponse:
- *       type: object
- *       properties:
- *         status:
- *           type: string
- *           example: success
- *         message:
- *           type: string
- *         data:
- *           type: object
- *           properties:
- *             user:
- *               type: object
- *               properties:
- *                 id:
- *                   type: integer
- *                 nombre:
- *                   type: string
- *                 apellido:
- *                   type: string
- *                 email:
- *                   type: string
- *                 rol:
- *                   type: string
- *                 institucion_id:
- *                   type: integer
- *                 institucion_nombre:
- *                   type: string
- *             tokens:
- *               type: object
- *               properties:
- *                 accessToken:
- *                   type: string
- *                 refreshToken:
- *                   type: string
- *                 expiresIn:
- *                   type: string
- *                   example: "15m"
- */
+// =====================================================
+// RUTAS DE REGISTRO Y LOGIN TRADICIONAL
+// =====================================================
 
-/**
- * @swagger
- * /auth/register:
- *   post:
- *     summary: Registrar nuevo usuario
- *     tags: [Autenticación]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/RegisterRequest'
- *     responses:
- *       201:
- *         description: Usuario registrado exitosamente
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/AuthResponse'
- *       400:
- *         description: Datos inválidos
- *       409:
- *         description: Email ya existe
- */
-router.post('/register', register);
+// Registro de usuario con verificación de email
+router.post('/register', authController.register);
 
-/**
- * @swagger
- * /auth/login:
- *   post:
- *     summary: Iniciar sesión
- *     tags: [Autenticación]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/LoginRequest'
- *     responses:
- *       200:
- *         description: Login exitoso
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/AuthResponse'
- *       401:
- *         description: Credenciales inválidas
- */
-router.post('/login', login);
+// Login de usuario
+router.post('/login', authController.login);
 
-/**
- * @swagger
- * /auth/refresh:
- *   post:
- *     summary: Renovar token de acceso
- *     tags: [Autenticación]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               refreshToken:
- *                 type: string
- *     responses:
- *       200:
- *         description: Token renovado exitosamente
- *       401:
- *         description: Refresh token inválido
- */
-router.post('/refresh', refreshToken);
+// Verificar email
+router.post('/verify-email', authController.verifyEmail);
 
-/**
- * @swagger
- * /auth/me:
- *   get:
- *     summary: Obtener perfil del usuario autenticado
- *     tags: [Autenticación]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Perfil obtenido exitosamente
- *       401:
- *         description: No autenticado
- */
-router.get('/me', requireAuth, getProfile);
+// Reenviar verificación de email
+router.post('/resend-verification', authController.resendVerification);
 
-/**
- * @swagger
- * /auth/logout:
- *   post:
- *     summary: Cerrar sesión
- *     tags: [Autenticación]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Logout exitoso
- */
-router.post('/logout', requireAuth, logout);
+// =====================================================
+// RUTAS DE GOOGLE OAUTH
+// =====================================================
+
+// Obtener URL de autenticación de Google
+router.get('/google', authController.googleAuth);
+
+// Callback de Google OAuth
+router.get('/google/callback', authController.googleCallback);
+
+// =====================================================
+// RUTAS PROTEGIDAS
+// =====================================================
+
+// Obtener información del usuario autenticado
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const [usuarios] = await db.execute(`
+      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, 
+             u.email_verificado, u.institucion_id, u.google_id,
+             i.nombre as institucion_nombre
+      FROM usuarios u
+      LEFT JOIN instituciones i ON u.institucion_id = i.id
+      WHERE u.id = ?
+    `, [req.user.id]);
+
+    if (usuarios.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    res.json({
+      status: 'success',
+      data: {
+        user: {
+          id: usuario.id,
+          nombre: usuario.nombre,
+          apellido: usuario.apellido,
+          email: usuario.email,
+          rol: usuario.rol,
+          email_verificado: usuario.email_verificado,
+          google_linked: !!usuario.google_id,
+          institucion: usuario.institucion_id ? {
+            id: usuario.institucion_id,
+            nombre: usuario.institucion_nombre
+          } : null
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo usuario:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+});
+
+// Logout (invalidar tokens)
+router.post('/logout', requireAuth, async (req, res) => {
+  try {
+    // Aquí puedes agregar lógica para invalidar el refresh token
+    // Por ejemplo, agregarlo a una blacklist en la base de datos
+    
+    res.json({
+      status: 'success',
+      message: 'Logout exitoso'
+    });
+  } catch (error) {
+    console.error('❌ Error en logout:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+});
+
+// Refresh token
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Refresh token requerido'
+      });
+    }
+
+    // Verificar refresh token
+    const decoded = jwt.verify(refresh_token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+
+    // Buscar usuario
+    const [usuarios] = await db.execute(
+      'SELECT id, email, rol, institucion_id FROM usuarios WHERE id = ? AND estado = "activo"',
+      [decoded.id]
+    );
+
+    if (usuarios.length === 0) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Usuario no válido'
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    // Generar nuevo access token
+    const tokenPayload = {
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      institucion_id: usuario.institucion_id
+    };
+
+    const newAccessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const newRefreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    res.json({
+      status: 'success',
+      data: {
+        tokens: {
+          access_token: newAccessToken,
+          refresh_token: newRefreshToken
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en refresh:', error);
+    res.status(401).json({
+      status: 'error',
+      message: 'Refresh token inválido'
+    });
+  }
+});
 
 export default router;
