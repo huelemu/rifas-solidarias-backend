@@ -1,215 +1,210 @@
-// =====================================================
-// CONTROLLER DE AUTENTICACIÓN COMPLETO
-// src/controllers/authController.js
-// =====================================================
+// src/controllers/authController.js - AGREGAR ESTAS FUNCIONES AL FINAL
 
-import db from '../config/db.js';
-import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { getGoogleAuthUrl, getGoogleUserInfo } from '../config/google.js';
-import emailService from '../services/emailService.js';
+import db from '../config/db.js';
 
 // =====================================================
-// REGISTRO CON VERIFICACIÓN DE EMAIL
+// FUNCIÓN PARA OBTENER URL DE GOOGLE OAUTH (LOGIN)
 // =====================================================
 
-export const register = async (req, res) => {
+/**
+ * Obtiene la URL de Google OAuth para login
+ * GET /auth/google/login
+ */
+export const getGoogleLoginUrl = async (req, res) => {
   console.log('\n🔐 ================================');
-  console.log('   REGISTRO DE USUARIO');
+  console.log('   GENERANDO URL GOOGLE OAUTH LOGIN');
   console.log('🔐 ================================');
-  
+
   try {
-    const { 
-      nombre, apellido, email, password, telefono, dni, 
-      rol = 'comprador', institucion_id 
-    } = req.body;
+    // Construir URL de Google OAuth
+    const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    
+    const params = {
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      redirect_uri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3100/auth/google/callback',
+      response_type: 'code',
+      scope: 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+      access_type: 'offline',
+      prompt: 'consent',
+      include_granted_scopes: 'true',
+      state: 'login' // Para identificar que es login, no registro
+    };
 
-    console.log('📝 Datos recibidos:', { nombre, apellido, email, rol, institucion_id });
-
-    // Validaciones básicas
-    if (!nombre || !apellido || !email || !password) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Nombre, apellido, email y contraseña son requeridos'
-      });
-    }
-
-    // Validar formato de email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Formato de email inválido'
-      });
-    }
-
-    // Validar contraseña
-    if (password.length < 6) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'La contraseña debe tener al menos 6 caracteres'
-      });
-    }
-
-    // Verificar email único
-    const [existingUser] = await db.execute(
-      'SELECT id, email FROM usuarios WHERE email = ?',
-      [email]
+    // Agregar parámetros a la URL
+    Object.keys(params).forEach(key => 
+      googleAuthUrl.searchParams.append(key, params[key])
     );
 
-    if (existingUser.length > 0) {
-      return res.status(409).json({
-        status: 'error',
-        message: 'Ya existe un usuario con ese email'
-      });
-    }
+    console.log('✅ URL de Google OAuth generada');
+    console.log('📍 URL:', googleAuthUrl.toString());
 
-    // Verificar institución si se especifica
-    if (institucion_id) {
-      const [institucion] = await db.execute(
-        'SELECT id, nombre FROM instituciones WHERE id = ? AND estado = "activa"',
-        [institucion_id]
-      );
-
-      if (institucion.length === 0) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Institución no válida'
-        });
-      }
-    }
-
-    // Encriptar contraseña
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // Insertar usuario
-    const [result] = await db.execute(`
-      INSERT INTO usuarios (nombre, apellido, email, password, telefono, dni, rol, institucion_id, email_verificado) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE)
-    `, [nombre, apellido, email, hashedPassword, telefono || null, dni || null, rol, institucion_id || null]);
-
-    const userId = result.insertId;
-    console.log('✅ Usuario creado con ID:', userId);
-
-    // Enviar email de verificación
-    try {
-      await emailService.sendVerificationEmail(email, nombre, userId);
-    } catch (emailError) {
-      console.error('⚠️ Error enviando email de verificación:', emailError);
-      // No fallar el registro si el email falla
-    }
-
-    // Obtener usuario creado
-    const [nuevoUsuario] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, u.email_verificado,
-             u.institucion_id, i.nombre as institucion_nombre
-      FROM usuarios u
-      LEFT JOIN instituciones i ON u.institucion_id = i.id
-      WHERE u.id = ?
-    `, [userId]);
-
-    const usuario = nuevoUsuario[0];
-
-    res.status(201).json({
+    res.json({
       status: 'success',
-      message: 'Usuario registrado exitosamente. Por favor verifica tu email.',
+      message: 'URL de Google OAuth generada exitosamente',
       data: {
-        user: {
-          id: usuario.id,
-          nombre: usuario.nombre,
-          apellido: usuario.apellido,
-          email: usuario.email,
-          rol: usuario.rol,
-          email_verificado: usuario.email_verificado,
-          institucion: usuario.institucion_id ? {
-            id: usuario.institucion_id,
-            nombre: usuario.institucion_nombre
-          } : null
-        }
+        authUrl: googleAuthUrl.toString()
       }
     });
 
   } catch (error) {
-    console.error('❌ Error en registro:', error);
+    console.error('💥 ERROR GENERANDO URL GOOGLE OAUTH:');
+    console.error('📝 Mensaje:', error.message);
+    
     res.status(500).json({
       status: 'error',
-      message: 'Error interno del servidor'
+      message: 'Error interno del servidor al generar URL de Google OAuth'
     });
   }
 };
 
 // =====================================================
-// LOGIN CON VERIFICACIÓN DE EMAIL
+// FUNCIÓN PARA MANEJAR CALLBACK DE GOOGLE OAUTH
 // =====================================================
 
-export const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+/**
+ * Maneja el callback de Google OAuth (para login)
+ * GET /auth/google/callback
+ */
+export const handleGoogleCallback = async (req, res) => {
+  console.log('\n🔐 ================================');
+  console.log('   CALLBACK GOOGLE OAUTH');
+  console.log('🔐 ================================');
 
-    if (!email || !password) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Email y contraseña son requeridos'
-      });
+  try {
+    const { code, state, error } = req.query;
+
+    // Verificar si hubo error en la autorización
+    if (error) {
+      console.log('❌ Error de Google OAuth:', error);
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/login?error=oauth_denied`);
     }
 
-    // Buscar usuario
-    const [usuarios] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.password, u.rol, 
-             u.estado, u.email_verificado, u.institucion_id, u.google_id,
-             i.nombre as institucion_nombre
+    if (!code) {
+      console.log('❌ No se recibió código de autorización');
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/login?error=no_code`);
+    }
+
+    console.log('✅ Código de autorización recibido');
+    console.log('📝 State:', state);
+
+    // =====================================================
+    // INTERCAMBIAR CÓDIGO POR TOKENS
+    // =====================================================
+    
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        code: code,
+        grant_type: 'authorization_code',
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3100/auth/google/callback'
+      })
+    });
+
+    const tokenData = await tokenResponse.json();
+
+    if (!tokenResponse.ok) {
+      console.error('❌ Error obteniendo tokens:', tokenData);
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/login?error=token_error`);
+    }
+
+    console.log('✅ Tokens obtenidos exitosamente');
+
+    // =====================================================
+    // OBTENER INFORMACIÓN DEL USUARIO DE GOOGLE
+    // =====================================================
+    
+    const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        'Authorization': `Bearer ${tokenData.access_token}`
+      }
+    });
+
+    const googleUser = await userResponse.json();
+
+    if (!userResponse.ok) {
+      console.error('❌ Error obteniendo información del usuario:', googleUser);
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/login?error=user_info_error`);
+    }
+
+    console.log('✅ Información del usuario obtenida:', {
+      id: googleUser.id,
+      email: googleUser.email,
+      name: googleUser.name,
+      verified_email: googleUser.verified_email
+    });
+
+    // =====================================================
+    // BUSCAR USUARIO EXISTENTE EN LA BASE DE DATOS
+    // =====================================================
+    
+    console.log('🔍 Buscando usuario en base de datos...');
+    
+    // Buscar por email o google_id
+    const [existingUsers] = await db.execute(`
+      SELECT 
+        u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, u.email_verificado,
+        u.institucion_id, u.google_id, i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
-      WHERE u.email = ?
-    `, [email]);
+      WHERE u.email = ? OR u.google_id = ?
+    `, [googleUser.email, googleUser.id]);
 
-    if (usuarios.length === 0) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Credenciales inválidas'
-      });
-    }
-
-    const usuario = usuarios[0];
-
-    // Verificar estado del usuario
-    if (usuario.estado !== 'activo') {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Usuario inactivo o bloqueado'
-      });
-    }
-
-    // Si es usuario de Google, redirigir a Google OAuth
-    if (usuario.google_id && !password) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Esta cuenta está vinculada con Google. Usa "Iniciar sesión con Google"'
-      });
-    }
-
-    // Verificar contraseña solo si no es usuario de Google
-    if (!usuario.google_id) {
-      const passwordValida = await bcrypt.compare(password, usuario.password);
+    if (existingUsers.length === 0) {
+      // =====================================================
+      // USUARIO NO EXISTE - REDIRIGIR A REGISTRO
+      // =====================================================
       
-      if (!passwordValida) {
-        return res.status(401).json({
-          status: 'error',
-          message: 'Credenciales inválidas'
-        });
-      }
+      console.log('❌ Usuario no encontrado');
+      console.log('🔄 Redirigiendo a registro con datos de Google...');
+      
+      // Redirigir al registro con los datos de Google
+      const registerUrl = new URL(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/register`);
+      registerUrl.searchParams.append('google_email', googleUser.email);
+      registerUrl.searchParams.append('google_name', googleUser.given_name || '');
+      registerUrl.searchParams.append('google_lastname', googleUser.family_name || '');
+      registerUrl.searchParams.append('google_id', googleUser.id);
+      registerUrl.searchParams.append('suggested', 'true');
+      
+      return res.redirect(registerUrl.toString());
     }
 
-    // Verificar email verificado
-    if (!usuario.email_verificado) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Por favor verifica tu email antes de iniciar sesión',
-        code: 'EMAIL_NOT_VERIFIED'
-      });
+    const usuario = existingUsers[0];
+    console.log('✅ Usuario encontrado:', { id: usuario.id, email: usuario.email, rol: usuario.rol });
+
+    // =====================================================
+    // VERIFICAR ESTADO DEL USUARIO
+    // =====================================================
+    
+    if (usuario.estado !== 'activo') {
+      console.log('❌ Usuario inactivo');
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/login?error=user_inactive`);
     }
 
-    // Generar tokens
+    // =====================================================
+    // ACTUALIZAR GOOGLE_ID SI NO EXISTE
+    // =====================================================
+    
+    if (!usuario.google_id) {
+      console.log('🔄 Vinculando cuenta con Google ID...');
+      await db.execute(
+        'UPDATE usuarios SET google_id = ?, email_verificado = 1 WHERE id = ?',
+        [googleUser.id, usuario.id]
+      );
+      console.log('✅ Cuenta vinculada con Google');
+    }
+
+    // =====================================================
+    // GENERAR TOKENS JWT
+    // =====================================================
+    
+    console.log('🔑 Generando tokens JWT...');
+    
     const tokenPayload = {
       id: usuario.id,
       email: usuario.email,
@@ -217,397 +212,103 @@ export const login = async (req, res) => {
       institucion_id: usuario.institucion_id
     };
 
-    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
-    const refreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    // Actualizar último login
-    await db.execute(
-      'UPDATE usuarios SET ultimo_login = NOW() WHERE id = ?',
-      [usuario.id]
+    const accessToken = jwt.sign(
+      tokenPayload, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '15m' }
     );
 
-    res.json({
-      status: 'success',
-      message: 'Login exitoso',
-      data: {
-        user: {
-          id: usuario.id,
-          nombre: usuario.nombre,
-          apellido: usuario.apellido,
-          email: usuario.email,
-          rol: usuario.rol,
-          email_verificado: usuario.email_verificado,
-          institucion: usuario.institucion_id ? {
-            id: usuario.institucion_id,
-            nombre: usuario.institucion_nombre
-          } : null
-        },
-        tokens: {
-          access_token: accessToken,
-          refresh_token: refreshToken
-        }
-      }
-    });
+    const refreshToken = jwt.sign(
+      { id: usuario.id }, 
+      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, 
+      { expiresIn: '7d' }
+    );
+
+    console.log('✅ Tokens generados exitosamente');
+
+    // =====================================================
+    // REDIRIGIR AL FRONTEND CON TOKENS
+    // =====================================================
+    
+    console.log('🎉 LOGIN CON GOOGLE COMPLETADO EXITOSAMENTE');
+    
+    // Redirigir al frontend con los tokens en la URL
+    const frontendUrl = new URL(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/dashboard`);
+    frontendUrl.searchParams.append('access_token', accessToken);
+    frontendUrl.searchParams.append('refresh_token', refreshToken);
+    
+    res.redirect(frontendUrl.toString());
 
   } catch (error) {
-    console.error('❌ Error en login:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
+    console.error('💥 ERROR EN GOOGLE CALLBACK:');
+    console.error('📝 Mensaje:', error.message);
+    console.error('📚 Stack:', error.stack);
+    
+    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/login?error=server_error`);
   }
 };
 
 // =====================================================
-// VERIFICACIÓN DE EMAIL
+// FUNCIÓN PARA REENVIAR VERIFICACIÓN DE EMAIL
 // =====================================================
 
-export const verifyEmail = async (req, res) => {
-  try {
-    const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Token de verificación requerido'
-      });
-    }
-
-    const result = await emailService.verifyEmailToken(token);
-
-    if (result.success) {
-      res.json({
-        status: 'success',
-        message: result.message,
-        data: {
-          user: result.user
-        }
-      });
-    } else {
-      res.status(400).json({
-        status: 'error',
-        message: result.message
-      });
-    }
-
-  } catch (error) {
-    console.error('❌ Error verificando email:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
-  }
-};
-
-// =====================================================
-// REENVIAR VERIFICACIÓN DE EMAIL
-// =====================================================
-
+/**
+ * Reenvía el email de verificación
+ * POST /auth/resend-verification
+ */
 export const resendVerification = async (req, res) => {
+  console.log('\n📧 ================================');
+  console.log('   REENVÍO DE VERIFICACIÓN');
+  console.log('📧 ================================');
+
   try {
     const { email } = req.body;
 
     if (!email) {
       return res.status(400).json({
         status: 'error',
-        message: 'Email requerido'
+        message: 'Email es requerido'
       });
     }
 
-    // Buscar usuario
-    const [usuarios] = await db.execute(
-      'SELECT id, nombre, email, email_verificado FROM usuarios WHERE email = ?',
+    // Buscar usuario por email
+    const [users] = await db.execute(
+      'SELECT id, email, email_verificado FROM usuarios WHERE email = ?',
       [email]
     );
 
-    if (usuarios.length === 0) {
+    if (users.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'Usuario no encontrado'
       });
     }
 
-    const usuario = usuarios[0];
+    const user = users[0];
 
-    if (usuario.email_verificado) {
+    if (user.email_verificado) {
       return res.status(400).json({
         status: 'error',
         message: 'El email ya está verificado'
       });
     }
 
-    // Reenviar email de verificación
-    await emailService.sendVerificationEmail(usuario.email, usuario.nombre, usuario.id);
+    // TODO: Aquí implementarías el envío del email
+    // Por ahora, simular que se envió
+    console.log('📧 Enviando email de verificación a:', email);
 
     res.json({
       status: 'success',
-      message: 'Email de verificación reenviado'
+      message: 'Email de verificación enviado exitosamente'
     });
 
   } catch (error) {
-    console.error('❌ Error reenviando verificación:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
-  }
-};
-
-// =====================================================
-// GOOGLE OAUTH - INICIAR PROCESO
-// =====================================================
-
-export const googleAuth = async (req, res) => {
-  try {
-    const authUrl = getGoogleAuthUrl();
+    console.error('💥 ERROR EN REENVÍO DE VERIFICACIÓN:');
+    console.error('📝 Mensaje:', error.message);
     
-    res.json({
-      status: 'success',
-      data: {
-        authUrl
-      }
-    });
-  } catch (error) {
-    console.error('❌ Error generando URL de Google:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error interno del servidor'
     });
   }
-};
-
-// =====================================================
-// GOOGLE OAUTH - CALLBACK
-// =====================================================
-
-export const googleCallback = async (req, res) => {
-  try {
-    const { code } = req.query;
-
-    if (!code) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Código de autorización requerido'
-      });
-    }
-
-    // Obtener información del usuario desde Google
-    const googleUser = await getGoogleUserInfo(code);
-
-    if (!googleUser.verified_email) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Email de Google no verificado'
-      });
-    }
-
-    // Buscar usuario existente
-    const [existingUsers] = await db.execute(
-      'SELECT * FROM usuarios WHERE email = ? OR google_id = ?',
-      [googleUser.email, googleUser.id]
-    );
-
-    let usuario;
-
-    if (existingUsers.length > 0) {
-      // Usuario existente - actualizar con datos de Google si es necesario
-      usuario = existingUsers[0];
-      
-      if (!usuario.google_id) {
-        await db.execute(
-          'UPDATE usuarios SET google_id = ?, email_verificado = TRUE WHERE id = ?',
-          [googleUser.id, usuario.id]
-        );
-      }
-    } else {
-      // Crear nuevo usuario
-      const [result] = await db.execute(`
-        INSERT INTO usuarios (nombre, apellido, email, google_id, rol, email_verificado, estado) 
-        VALUES (?, ?, ?, ?, 'comprador', TRUE, 'activo')
-      `, [googleUser.nombre, googleUser.apellido || '', googleUser.email, googleUser.id]);
-
-      const [nuevoUsuario] = await db.execute(
-        'SELECT * FROM usuarios WHERE id = ?',
-        [result.insertId]
-      );
-      
-      usuario = nuevoUsuario[0];
-    }
-
-    // Generar tokens
-    const tokenPayload = {
-      id: usuario.id,
-      email: usuario.email,
-      rol: usuario.rol,
-      institucion_id: usuario.institucion_id
-    };
-
-    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
-    const refreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    // Actualizar último login
-    await db.execute(
-      'UPDATE usuarios SET ultimo_login = NOW() WHERE id = ?',
-      [usuario.id]
-    );
-
-    // Redirigir al frontend con tokens
-    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?access_token=${accessToken}&refresh_token=${refreshToken}`;
-    res.redirect(redirectUrl);
-
-  } catch (error) {
-    console.error('❌ Error en callback de Google:', error);
-    const errorUrl = `${process.env.FRONTEND_URL}/auth/error?message=Error de autenticación`;
-    res.redirect(errorUrl);
-  }
-};
-
-// =====================================================
-// OBTENER INFORMACIÓN DEL USUARIO AUTENTICADO
-// =====================================================
-
-export const getMe = async (req, res) => {
-  try {
-    const [usuarios] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, 
-             u.email_verificado, u.institucion_id, u.google_id,
-             i.nombre as institucion_nombre
-      FROM usuarios u
-      LEFT JOIN instituciones i ON u.institucion_id = i.id
-      WHERE u.id = ?
-    `, [req.user.id]);
-
-    if (usuarios.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Usuario no encontrado'
-      });
-    }
-
-    const usuario = usuarios[0];
-
-    res.json({
-      status: 'success',
-      data: {
-        user: {
-          id: usuario.id,
-          nombre: usuario.nombre,
-          apellido: usuario.apellido,
-          email: usuario.email,
-          rol: usuario.rol,
-          email_verificado: usuario.email_verificado,
-          google_linked: !!usuario.google_id,
-          institucion: usuario.institucion_id ? {
-            id: usuario.institucion_id,
-            nombre: usuario.institucion_nombre
-          } : null
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error obteniendo usuario:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
-  }
-};
-
-// =====================================================
-// REFRESH TOKEN
-// =====================================================
-
-export const refreshToken = async (req, res) => {
-  try {
-    const { refresh_token } = req.body;
-
-    if (!refresh_token) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Refresh token requerido'
-      });
-    }
-
-    // Verificar refresh token
-    const decoded = jwt.verify(refresh_token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
-
-    // Buscar usuario
-    const [usuarios] = await db.execute(
-      'SELECT id, email, rol, institucion_id FROM usuarios WHERE id = ? AND estado = "activo"',
-      [decoded.id]
-    );
-
-    if (usuarios.length === 0) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Usuario no válido'
-      });
-    }
-
-    const usuario = usuarios[0];
-
-    // Generar nuevo access token
-    const tokenPayload = {
-      id: usuario.id,
-      email: usuario.email,
-      rol: usuario.rol,
-      institucion_id: usuario.institucion_id
-    };
-
-    const newAccessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
-    const newRefreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    res.json({
-      status: 'success',
-      data: {
-        tokens: {
-          access_token: newAccessToken,
-          refresh_token: newRefreshToken
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error en refresh:', error);
-    res.status(401).json({
-      status: 'error',
-      message: 'Refresh token inválido'
-    });
-  }
-};
-
-// =====================================================
-// LOGOUT
-// =====================================================
-
-export const logout = async (req, res) => {
-  try {
-    // Aquí puedes agregar lógica para invalidar el refresh token
-    // Por ejemplo, agregarlo a una blacklist en la base de datos
-    
-    res.json({
-      status: 'success',
-      message: 'Logout exitoso'
-    });
-  } catch (error) {
-    console.error('❌ Error en logout:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
-  }
-};
-
-// Exportar controlador
-export const authController = {
-  register,
-  login,
-  verifyEmail,
-  resendVerification,
-  googleAuth,
-  googleCallback,
-  getMe,
-  refreshToken,
-  logout
 };

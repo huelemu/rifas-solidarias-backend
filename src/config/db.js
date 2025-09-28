@@ -1,5 +1,5 @@
 // =====================================================
-// CONFIGURACIÓN BÁSICA DE BASE DE DATOS
+// CONFIGURACIÓN BÁSICA DE BASE DE DATOS (CORREGIDO)
 // src/config/db.js
 // =====================================================
 
@@ -8,29 +8,31 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Configuración de la conexión a MySQL/MariaDB
+// Configuración base SIN acquireTimeout
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'rifas_solidarias_nuevo', // ← Tu nueva base
+  database: process.env.DB_NAME || 'rifas_solidarias_nuevo',
   port: process.env.DB_PORT || 3306,
   charset: 'utf8mb4',
   timezone: '+00:00',
-  acquireTimeout: 60000,
-  timeout: 60000,
+  connectTimeout: 60000 // ⬅️ reemplazo de "timeout"
 };
 
-// Crear pool de conexiones
-const pool = mysql.createPool({
+// Crear pool de conexiones (aquí sí usamos acquireTimeout)
+let pool = mysql.createPool({
   ...dbConfig,
+  acquireTimeout: 60000,   // ⬅️ válido solo en pool
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0,
-  reconnect: true
+  queueLimit: 0
 });
 
-// Función para probar la conexión
+// =====================================================
+// Funciones de utilidad
+// =====================================================
+
 export const testConnection = async () => {
   try {
     const connection = await pool.getConnection();
@@ -44,7 +46,6 @@ export const testConnection = async () => {
   }
 };
 
-// Función para ejecutar queries con logging
 export const executeQuery = async (sql, params = []) => {
   try {
     const [results] = await pool.execute(sql, params);
@@ -57,7 +58,6 @@ export const executeQuery = async (sql, params = []) => {
   }
 };
 
-// Función para transacciones
 export const transaction = async (callback) => {
   const connection = await pool.getConnection();
   try {
@@ -73,14 +73,13 @@ export const transaction = async (callback) => {
   }
 };
 
-// Exportar el pool como default
+// Exportar pool
 export default pool;
 
 // =====================================================
-// VERIFICAR VARIABLES DE ENTORNO
+// Verificación de variables de entorno
 // =====================================================
 
-// Verificar que las variables esenciales estén configuradas
 const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'JWT_SECRET'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
