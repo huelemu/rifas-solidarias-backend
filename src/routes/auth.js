@@ -1,65 +1,114 @@
-// src/routes/auth.js - RUTAS COMPLETAS Y CORREGIDAS
+// src/routes/auth.js - CON RUTAS GOOGLE OAUTH AGREGADAS
 
 import express from 'express';
 import { 
   register, 
   login, 
   refreshToken, 
-  me,
-  logout,
-  // Estas funciones necesitas agregarlas al controller:
-  getGoogleLoginUrl,        // NUEVA FUNCIÓN
-  handleGoogleCallback,     // NUEVA FUNCIÓN
-  resendVerification        // NUEVA FUNCIÓN (para el register component)
+  logout, 
+  getProfile,
+  // ✅ AGREGAR IMPORTACIONES GOOGLE OAUTH
+  getGoogleLoginUrl,
+  handleGoogleCallback,
+  resendVerification
 } from '../controllers/authController.js';
-import { authenticateToken } from '../middleware/auth.js';
-import rateLimit from 'express-rate-limit';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// =====================================================
-// RATE LIMITING
-// =====================================================
-
-// Rate limit general para autenticación
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10, // 10 intentos por IP por ventana
-  message: {
-    status: 'error',
-    message: 'Demasiados intentos de autenticación. Intenta nuevamente en 15 minutos.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-// Rate limit específico para login
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5, // 5 intentos de login por IP por ventana
-  message: {
-    status: 'error',
-    message: 'Demasiados intentos de login. Intenta nuevamente en 15 minutos.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-// Rate limit para Google OAuth
-const oauthLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutos
-  max: 20, // 20 intentos por IP por ventana
-  message: {
-    status: 'error',
-    message: 'Demasiados intentos de OAuth. Intenta nuevamente en 5 minutos.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-// =====================================================
-// RUTAS DE AUTENTICACIÓN TRADICIONAL
-// =====================================================
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     LoginRequest:
+ *       type: object
+ *       required:
+ *         - email
+ *         - password
+ *       properties:
+ *         email:
+ *           type: string
+ *           format: email
+ *           example: usuario@ejemplo.com
+ *         password:
+ *           type: string
+ *           example: mipassword123
+ *     
+ *     RegisterRequest:
+ *       type: object
+ *       required:
+ *         - nombre
+ *         - apellido
+ *         - email
+ *         - password
+ *       properties:
+ *         nombre:
+ *           type: string
+ *           example: Juan
+ *         apellido:
+ *           type: string
+ *           example: Pérez
+ *         email:
+ *           type: string
+ *           format: email
+ *           example: juan.perez@ejemplo.com
+ *         password:
+ *           type: string
+ *           minLength: 6
+ *           example: password123
+ *         telefono:
+ *           type: string
+ *           example: "+5491123456789"
+ *         dni:
+ *           type: string
+ *           example: "12345678"
+ *         rol:
+ *           type: string
+ *           enum: [admin_global, admin_institucion, vendedor, comprador]
+ *           default: comprador
+ *         institucion_id:
+ *           type: integer
+ *           example: 1
+ *     
+ *     AuthResponse:
+ *       type: object
+ *       properties:
+ *         status:
+ *           type: string
+ *           example: success
+ *         message:
+ *           type: string
+ *         data:
+ *           type: object
+ *           properties:
+ *             user:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 nombre:
+ *                   type: string
+ *                 apellido:
+ *                   type: string
+ *                 email:
+ *                   type: string
+ *                 rol:
+ *                   type: string
+ *                 institucion_id:
+ *                   type: integer
+ *                 institucion_nombre:
+ *                   type: string
+ *             tokens:
+ *               type: object
+ *               properties:
+ *                 accessToken:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *                 expiresIn:
+ *                   type: string
+ *                   example: "15m"
+ */
 
 /**
  * @swagger
@@ -72,49 +121,20 @@ const oauthLimiter = rateLimit({
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - nombre
- *               - apellido
- *               - email
- *               - password
- *             properties:
- *               nombre:
- *                 type: string
- *                 example: "Juan"
- *               apellido:
- *                 type: string
- *                 example: "Pérez"
- *               email:
- *                 type: string
- *                 format: email
- *                 example: "juan@ejemplo.com"
- *               password:
- *                 type: string
- *                 minLength: 6
- *                 example: "123456"
- *               telefono:
- *                 type: string
- *                 example: "+5491123456789"
- *               dni:
- *                 type: string
- *                 example: "12345678"
- *               rol:
- *                 type: string
- *                 enum: [admin_global, admin_institucion, vendedor, comprador]
- *                 default: "comprador"
- *               institucion_id:
- *                 type: integer
- *                 example: 1
+ *             $ref: '#/components/schemas/RegisterRequest'
  *     responses:
  *       201:
  *         description: Usuario registrado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
  *       400:
  *         description: Datos inválidos
  *       409:
  *         description: Email ya existe
  */
-router.post('/register', authLimiter, register);
+router.post('/register', register);
 
 /**
  * @swagger
@@ -127,177 +147,18 @@ router.post('/register', authLimiter, register);
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 example: "admin@test.com"
- *               password:
- *                 type: string
- *                 example: "123456"
+ *             $ref: '#/components/schemas/LoginRequest'
  *     responses:
  *       200:
  *         description: Login exitoso
- *       401:
- *         description: Credenciales inválidas
- */
-router.post('/login', loginLimiter, login);
-
-/**
- * @swagger
- * /auth/resend-verification:
- *   post:
- *     summary: Reenviar email de verificación
- *     tags: [Autenticación]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 example: "usuario@ejemplo.com"
- *     responses:
- *       200:
- *         description: Email de verificación enviado
- *       400:
- *         description: Email inválido
- */
-router.post('/resend-verification', authLimiter, resendVerification);
-
-// =====================================================
-// RUTAS DE GOOGLE OAUTH
-// =====================================================
-
-/**
- * @swagger
- * /auth/google/login:
- *   get:
- *     summary: Obtener URL de Google OAuth para login
- *     tags: [Google OAuth]
- *     description: Retorna la URL de Google OAuth para iniciar el proceso de login
- *     responses:
- *       200:
- *         description: URL de Google OAuth generada exitosamente
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: URL de Google OAuth generada exitosamente
- *                 data:
- *                   type: object
- *                   properties:
- *                     authUrl:
- *                       type: string
- *                       example: https://accounts.google.com/o/oauth2/v2/auth?...
- *       500:
- *         description: Error interno del servidor
- */
-router.get('/google/login', oauthLimiter, getGoogleLoginUrl);
-
-/**
- * @swagger
- * /auth/google/callback:
- *   get:
- *     summary: Callback de Google OAuth
- *     tags: [Google OAuth]
- *     description: Maneja el callback de Google después de autorización
- *     parameters:
- *       - in: query
- *         name: code
- *         schema:
- *           type: string
- *         description: Código de autorización de Google
- *       - in: query
- *         name: state
- *         schema:
- *           type: string
- *         description: Estado para verificar la solicitud
- *       - in: query
- *         name: error
- *         schema:
- *           type: string
- *         description: Error de autorización (si existe)
- *     responses:
- *       302:
- *         description: Redirección al frontend con tokens o error
- *       400:
- *         description: Error en los parámetros
- */
-router.get('/google/callback', handleGoogleCallback);
-
-/**
- * @swagger
- * /auth/google:
- *   get:
- *     summary: Redirección directa a Google OAuth
- *     tags: [Google OAuth]
- *     description: Redirige directamente a Google OAuth (método alternativo)
- *     responses:
- *       302:
- *         description: Redirección a Google OAuth
- */
-router.get('/google', oauthLimiter, async (req, res) => {
-  // Método alternativo: redirigir directamente sin JSON
-  try {
-    const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    
-    const params = {
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3100/auth/google/callback',
-      response_type: 'code',
-      scope: 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
-      access_type: 'offline',
-      prompt: 'consent',
-      include_granted_scopes: 'true',
-      state: 'login'
-    };
-
-    Object.keys(params).forEach(key => 
-      googleAuthUrl.searchParams.append(key, params[key])
-    );
-
-    res.redirect(googleAuthUrl.toString());
-  } catch (error) {
-    console.error('Error en redirección directa a Google:', error);
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/login?error=oauth_error`);
-  }
-});
-
-// =====================================================
-// RUTAS PROTEGIDAS
-// =====================================================
-
-/**
- * @swagger
- * /auth/me:
- *   get:
- *     summary: Obtener perfil del usuario actual
- *     tags: [Autenticación]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Perfil del usuario
+ *               $ref: '#/components/schemas/AuthResponse'
  *       401:
- *         description: Token inválido o expirado
+ *         description: Credenciales inválidas
  */
-router.get('/me', authenticateToken, me);
+router.post('/login', login);
 
 /**
  * @swagger
@@ -311,12 +172,9 @@ router.get('/me', authenticateToken, me);
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - refreshToken
  *             properties:
  *               refreshToken:
  *                 type: string
- *                 example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *     responses:
  *       200:
  *         description: Token renovado exitosamente
@@ -324,6 +182,22 @@ router.get('/me', authenticateToken, me);
  *         description: Refresh token inválido
  */
 router.post('/refresh', refreshToken);
+
+/**
+ * @swagger
+ * /auth/me:
+ *   get:
+ *     summary: Obtener perfil del usuario autenticado
+ *     tags: [Autenticación]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Perfil obtenido exitosamente
+ *       401:
+ *         description: No autenticado
+ */
+router.get('/me', requireAuth, getProfile);
 
 /**
  * @swagger
@@ -335,49 +209,156 @@ router.post('/refresh', refreshToken);
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Sesión cerrada exitosamente
- *       401:
- *         description: Token inválido
+ *         description: Logout exitoso
  */
-router.post('/logout', authenticateToken, logout);
+router.post('/logout', requireAuth, logout);
 
 // =====================================================
-// RUTA DE INFORMACIÓN DEL SISTEMA
+// ✅ NUEVAS RUTAS GOOGLE OAUTH
 // =====================================================
 
 /**
  * @swagger
- * /auth/info:
+ * /auth/google/login:
  *   get:
- *     summary: Información del sistema de autenticación
- *     tags: [Sistema]
+ *     summary: Obtener URL de autenticación Google para login
+ *     tags: [Autenticación]
  *     responses:
  *       200:
- *         description: Información del sistema
+ *         description: URL de Google OAuth generada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     authUrl:
+ *                       type: string
+ *                       example: "https://accounts.google.com/o/oauth2/v2/auth?..."
  */
-router.get('/info', (req, res) => {
-  res.json({
-    status: 'success',
-    message: 'Sistema de autenticación activo',
-    data: {
-      version: '2.0.0',
-      features: [
-        'JWT Authentication',
-        'Google OAuth 2.0',
-        'Role-based Access Control',
-        'Email Verification',
-        'Rate Limiting',
-        'Audit Logs'
-      ],
-      endpoints: {
-        traditional: ['/register', '/login', '/refresh', '/logout'],
-        oauth: ['/google', '/google/callback', '/google/login'],
-        protected: ['/me'],
-        utils: ['/resend-verification', '/info']
-      },
-      documentation: '/api-docs'
-    }
-  });
+router.get('/google/login', getGoogleLoginUrl);
+
+/**
+ * @swagger
+ * /auth/google/register:
+ *   get:
+ *     summary: Obtener URL de autenticación Google para registro
+ *     tags: [Autenticación]
+ *     responses:
+ *       200:
+ *         description: URL de Google OAuth generada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     authUrl:
+ *                       type: string
+ *                       example: "https://accounts.google.com/o/oauth2/v2/auth?..."
+ */
+// ✅ NUEVA RUTA QUE FALTABA
+router.get('/google/register', (req, res) => {
+  // Mismo método que login pero con state=register
+  console.log('\n🔐 ================================');
+  console.log('   GENERANDO URL GOOGLE OAUTH REGISTER');
+  console.log('🔐 ================================');
+
+  try {
+    // Construir URL de Google OAuth para registro
+    const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    
+    const params = {
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      redirect_uri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3100/auth/google/callback',
+      response_type: 'code',
+      scope: 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+      access_type: 'offline',
+      prompt: 'consent',
+      include_granted_scopes: 'true',
+      state: 'register' // ✅ Diferenciamos entre login y register
+    };
+
+    Object.keys(params).forEach(key => 
+      googleAuthUrl.searchParams.append(key, params[key])
+    );
+
+    console.log('✅ URL de Google OAuth para registro generada');
+
+    res.json({
+      status: 'success',
+      message: 'URL de Google OAuth para registro generada exitosamente',
+      data: {
+        authUrl: googleAuthUrl.toString()
+      }
+    });
+
+  } catch (error) {
+    console.error('💥 ERROR GENERANDO URL GOOGLE OAUTH REGISTER:', error.message);
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor al generar URL de Google OAuth'
+    });
+  }
 });
+
+/**
+ * @swagger
+ * /auth/google/callback:
+ *   get:
+ *     summary: Callback de autenticación Google
+ *     tags: [Autenticación]
+ *     parameters:
+ *       - name: code
+ *         in: query
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: state
+ *         in: query
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [login, register]
+ *     responses:
+ *       302:
+ *         description: Redirección al frontend
+ */
+router.get('/google/callback', handleGoogleCallback);
+
+/**
+ * @swagger
+ * /auth/resend-verification:
+ *   post:
+ *     summary: Reenviar email de verificación
+ *     tags: [Autenticación]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *     responses:
+ *       200:
+ *         description: Email enviado exitosamente
+ *       404:
+ *         description: Usuario no encontrado
+ */
+router.post('/resend-verification', resendVerification);
 
 export default router;

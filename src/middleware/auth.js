@@ -1,4 +1,5 @@
-// src/middleware/auth.js
+// src/middleware/auth.js - VERSIÓN CORREGIDA
+
 import jwt from 'jsonwebtoken';
 import db from '../config/db.js';
 
@@ -30,10 +31,14 @@ export const verifyRefreshToken = (token) => {
 };
 
 // =====================================================
-// MIDDLEWARE DE AUTENTICACIÓN
+// MIDDLEWARE DE AUTENTICACIÓN PRINCIPAL
 // =====================================================
 
-export const requireAuth = async (req, res, next) => {
+/**
+ * Middleware principal de autenticación - REQUERIDA
+ * Verificar token y usuario activo
+ */
+export const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     
@@ -58,17 +63,16 @@ export const requireAuth = async (req, res, next) => {
     // Verificar token
     const decoded = verifyAccessToken(token);
     
-    
     // El userId puede estar en diferentes campos según cómo se generó el token
-   const userId = decoded.id;
+    const userId = decoded.id || decoded.userId || decoded.user_id;
     
     if (!userId) {
       return res.status(401).json({
-      status: 'error',
-      message: 'Token inválido: ID de usuario no encontrado',
-      code: 'INVALID_TOKEN_STRUCTURE'
-  });
-}
+        status: 'error',
+        message: 'Token inválido: ID de usuario no encontrado',
+        code: 'INVALID_TOKEN_STRUCTURE'
+      });
+    }
     
     // Verificar que el usuario existe y está activo
     const [usuarios] = await db.execute(
@@ -102,7 +106,7 @@ export const requireAuth = async (req, res, next) => {
     next();
 
   } catch (error) {
-    console.error('Error en middleware requireAuth:', error);
+    console.error('Error en middleware authenticateToken:', error);
     
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
@@ -126,6 +130,11 @@ export const requireAuth = async (req, res, next) => {
     });
   }
 };
+
+/**
+ * Alias para compatibilidad
+ */
+export const requireAuth = authenticateToken;
 
 // =====================================================
 // MIDDLEWARE DE ROLES
@@ -400,10 +409,11 @@ export const logAuthAttempt = async (req, res, next) => {
 };
 
 // =====================================================
-// EXPORTACIONES POR DEFECTO
+// EXPORTACIONES POR DEFECTO (OPCIONAL)
 // =====================================================
 
 export default {
+  authenticateToken,
   requireAuth,
   requireRole,
   requireOwnership,
