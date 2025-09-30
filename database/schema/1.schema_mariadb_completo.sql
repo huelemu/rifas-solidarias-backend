@@ -18,6 +18,7 @@ CREATE TABLE instituciones (
     descripcion TEXT,
     direccion VARCHAR(255),
     telefono VARCHAR(20),
+    tipo VARCHAR(100),
     email VARCHAR(100),
     logo_url VARCHAR(255),
     cuit VARCHAR(15),

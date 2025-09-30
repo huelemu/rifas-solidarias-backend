@@ -18,6 +18,10 @@ import rifasRoutes from './src/routes/rifas.js'; // ✅ NUEVA RUTA
 // Importar middleware de autenticación
 import { requireAuth, optionalAuth } from './src/middleware/auth.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+
 // Configurar variables de entorno PRIMERO
 dotenv.config();
 
@@ -285,6 +289,14 @@ app.get('/', (req, res) => {
     }
   });
 });
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Servir uploads como estáticos
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+console.log('✅ Sirviendo archivos estáticos desde /uploads');
 
 // Test de conexión a BD
 app.get('/test-db', async (req, res) => {

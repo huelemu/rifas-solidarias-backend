@@ -1,14 +1,27 @@
 // src/routes/instituciones.js
 import express from 'express';
-import {
+
+import { uploadLogo } from '../config/upload.js';
+import { 
   obtenerInstituciones,
   obtenerInstitucionPorId,
   crearInstitucion,
   actualizarInstitucion,
-  eliminarInstitucion
+  eliminarInstitucion,
+  obtenerEstadisticasInstituciones,
+  subirLogo,      // ← NUEVO
+  eliminarLogo    // ← NUEVO
 } from '../controllers/institucionesController.js';
+import { requireAuth, requireRole } from '../middleware/auth.js';  // ← Esta línea es clave
+import { ROLES } from '../constants/roles.js';
+
+
+
+
 
 const router = express.Router();
+
+router.get('/stats', requireAuth, obtenerEstadisticasInstituciones);
 
 /**
  * @swagger
@@ -209,6 +222,21 @@ router.get('/:id', obtenerInstitucionPorId);
  */
 router.post('/', crearInstitucion);
 
+// Subir logo
+router.post('/:id/logo', 
+  requireAuth, 
+  requireRole([ROLES.ADMIN_GLOBAL]), 
+  uploadLogo.single('logo'),  // ← Middleware de multer
+  subirLogo
+);
+
+// Eliminar logo
+router.delete('/:id/logo',
+  requireAuth,
+  requireRole([ROLES.ADMIN_GLOBAL]),
+  eliminarLogo
+);
+
 /**
  * @swagger
  * /instituciones/{id}:
@@ -279,5 +307,6 @@ router.put('/:id', actualizarInstitucion);
  *         description: No se puede eliminar (tiene rifas asociadas)
  */
 router.delete('/:id', eliminarInstitucion);
+
 
 export default router;
