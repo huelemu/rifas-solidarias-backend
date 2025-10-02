@@ -21,6 +21,7 @@ import { requireAuth } from '../middleware/auth.js';
 import db from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import { sendPasswordResetEmail } from '../services/emailService.js';
 
 
 const router = express.Router();
@@ -453,6 +454,217 @@ router.get('/check-verification/:email', async (req, res) => {
   }
 });
 
+
+// =====================================================
+// ENDPOINT 1: SOLICITAR RESET DE CONTRASEÑA
+// =====================================================
+
+/**
+ * POST /auth/forgot-password
+ * Envía email con token para restablecer contraseña
+ */
+router.post('/forgot-password', [
+  body('email').isEmail().withMessage('Email inválido')
+], async (req, res) => {
+  try {
+    // Validar errores
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        errors: errors.array()
+      });
+    }
+
+    const { email } = req.body;
+
+    // Buscar usuario
+    const [usuarios] = await db.execute(
+      'SELECT id, nombre FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    // Por seguridad, siempre responder lo mismo aunque el email no exista
+    if (usuarios.length === 0) {
+      return res.json({
+        status: 'success',
+        message: 'Si el email existe, recibirás un link para restablecer tu contraseña'
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    // Verificar rate limiting (no más de 1 reset cada 5 minutos)
+    const [recentResets] = await db.execute(`
+      SELECT COUNT(*) as count 
+      FROM email_logs 
+      WHERE email = ? 
+        AND tipo = 'password_reset' 
+        AND fecha_envio > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+    `, [email]);
+
+    if (recentResets[0].count > 0) {
+      return res.status(429).json({
+        status: 'error',
+        message: 'Ya se envió un email de recuperación recientemente. Por favor, espera 5 minutos.'
+      });
+    }
+
+    // Enviar email de reset
+    try {
+      await sendPasswordResetEmail(email, usuario.nombre, usuario.id);
+      console.log(`✅ Email de reset enviado a ${email}`);
+    } catch (emailError) {
+      console.error('Error enviando email de reset:', emailError);
+      // No revelar si el email falló
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Si el email existe, recibirás un link para restablecer tu contraseña'
+    });
+
+  } catch (error) {
+    console.error('Error en forgot-password:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error procesando solicitud'
+    });
+  }
+});
+
+// =====================================================
+// ENDPOINT 2: VERIFICAR TOKEN DE RESET (OPCIONAL)
+// =====================================================
+
+/**
+ * GET /auth/verify-reset-token?token=xxx
+ * Verifica si un token de reset es válido (sin usarlo)
+ */
+router.get('/verify-reset-token', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token requerido'
+      });
+    }
+
+    const [tokens] = await db.execute(`
+      SELECT usuario_id, expires_at 
+      FROM password_reset_tokens 
+      WHERE token = ? 
+        AND usado = FALSE 
+        AND expires_at > NOW()
+    `, [token]);
+
+    if (tokens.length === 0) {
+      return res.json({
+        status: 'error',
+        valid: false,
+        message: 'Token inválido o expirado'
+      });
+    }
+
+    res.json({
+      status: 'success',
+      valid: true,
+      expiresAt: tokens[0].expires_at
+    });
+
+  } catch (error) {
+    console.error('Error verificando token de reset:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error verificando token'
+    });
+  }
+});
+
+// =====================================================
+// ENDPOINT 3: RESTABLECER CONTRASEÑA
+// =====================================================
+
+/**
+ * POST /auth/reset-password
+ * Cambia la contraseña usando el token
+ */
+router.post('/reset-password', [
+  body('token').notEmpty().withMessage('Token requerido'),
+  body('newPassword').isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+], async (req, res) => {
+  try {
+    // Validar errores
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        errors: errors.array()
+      });
+    }
+
+    const { token, newPassword } = req.body;
+
+    // Verificar token
+    const [tokens] = await db.execute(`
+      SELECT usuario_id, expires_at
+      FROM password_reset_tokens 
+      WHERE token = ? 
+        AND usado = FALSE 
+        AND expires_at > NOW()
+    `, [token]);
+
+    if (tokens.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token inválido o expirado. Solicita un nuevo link de recuperación.'
+      });
+    }
+
+    const userId = tokens[0].usuario_id;
+
+    // Hash de la nueva contraseña
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // Actualizar contraseña
+    await db.execute(
+      'UPDATE usuarios SET password = ? WHERE id = ?',
+      [hashedPassword, userId]
+    );
+
+    // Marcar token como usado
+    await db.execute(
+      'UPDATE password_reset_tokens SET usado = TRUE WHERE token = ?',
+      [token]
+    );
+
+    // Opcional: Invalidar todas las sesiones activas del usuario
+    await db.execute(
+      'UPDATE sesiones_activas SET activa = FALSE WHERE usuario_id = ?',
+      [userId]
+    );
+
+    // Log de cambio de contraseña
+    await db.execute(`
+      INSERT INTO auth_logs (usuario_id, accion, ip_address, user_agent)
+      VALUES (?, 'cambio_password', ?, ?)
+    `, [userId, req.ip, req.get('user-agent')]);
+
+    res.json({
+      status: 'success',
+      message: '✅ Contraseña actualizada exitosamente. Ya puedes iniciar sesión con tu nueva contraseña.'
+    });
+
+  } catch (error) {
+    console.error('Error en reset-password:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al restablecer contraseña'
+    });
+  }
+});
 
 /**
  * @swagger
