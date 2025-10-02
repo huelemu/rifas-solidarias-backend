@@ -348,52 +348,51 @@ export const sendVerificationEmail = async (email, nombre, userId) => {
 
 export const verifyEmailToken = async (token) => {
   try {
+    // SIN TRANSACCIONES - usar query simple
     const [result] = await db.execute(`
-      SELECT ev.*, u.email, u.nombre, u.apellido 
+      SELECT 
+        ev.usuario_id,
+        ev.usado,
+        ev.expires_at,
+        u.email
       FROM email_verifications ev
       JOIN usuarios u ON ev.usuario_id = u.id
-      WHERE ev.token = ? AND ev.expires_at > NOW() AND ev.usado = FALSE
+      WHERE ev.token = ?
+        AND ev.usado = FALSE
+        AND ev.expires_at > NOW()
     `, [token]);
-    
+
     if (result.length === 0) {
-      return { success: false, message: 'Token inválido o expirado' };
-    }
-    
-    const verification = result[0];
-    
-    // Marcar token como usado y usuario como verificado
-    await db.execute('BEGIN');
-    
-    await db.execute(
-      'UPDATE email_verifications SET usado = TRUE WHERE id = ?',
-      [verification.id]
-    );
-    
-    await db.execute(
-      'UPDATE usuarios SET email_verificado = TRUE, fecha_verificacion = NOW() WHERE id = ?',
-      [verification.usuario_id]
-    );
-    
-    await db.execute('COMMIT');
-    
-    // Enviar email de bienvenida
-    await sendEmail(
-      verification.email,
-      emailTemplates.welcome.subject,
-      emailTemplates.welcome.html(verification.nombre)
-    );
-    
-    return { 
-      success: true, 
-      message: 'Email verificado exitosamente',
-      user: {
-        id: verification.usuario_id,
-        email: verification.email,
-        nombre: verification.nombre
+      // Token no encontrado, usado o expirado
+      const [expiredCheck] = await db.execute(`
+        SELECT expires_at FROM email_verifications WHERE token = ?
+      `, [token]);
+
+      if (expiredCheck.length === 0) {
+        return {
+          valid: false,
+          message: 'Token inválido',
+          expired: false
+        };
       }
+
+      return {
+        valid: false,
+        message: 'Token expirado o ya fue usado',
+        expired: true
+      };
+    }
+
+    const verification = result[0];
+
+    return {
+      valid: true,
+      userId: verification.usuario_id,
+      email: verification.email,
+      message: 'Token válido'
     };
+
   } catch (error) {
-    await db.execute('ROLLBACK');
     console.error('❌ Error verificando token:', error);
     throw error;
   }

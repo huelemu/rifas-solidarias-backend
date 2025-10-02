@@ -14,6 +14,7 @@ import authRoutes from './src/routes/auth.js';
 import institucionRoutes from './src/routes/instituciones.js';
 import usuariosRoutes from './src/routes/usuarios.js';
 import rifasRoutes from './src/routes/rifas.js'; // ✅ NUEVA RUTA
+import notificationRoutes from './src/routes/notificationRoutes.js';
 
 // Importar middleware de autenticación
 import { requireAuth, optionalAuth } from './src/middleware/auth.js';
@@ -477,6 +478,10 @@ console.log('✅ Rutas de rifas configuradas');
 
 console.log('🎯 Todas las rutas configuradas correctamente');
 
+// Rutas de notificaciones
+app.use('/notifications', notificationRoutes);
+console.log('✅ Rutas de notificaciones configuradas');
+
 // =====================================================
 // DOCUMENTACIÓN SWAGGER
 // =====================================================
@@ -543,6 +548,8 @@ app.use('*', (req, res) => {
     available_modules: ['auth', 'instituciones', 'usuarios', 'rifas']
   });
 });
+
+
 
 // =====================================================
 // INICIAR SERVIDOR

@@ -8,6 +8,7 @@ import { body, param, query } from 'express-validator';
 import rifasController, { rifasValidations } from '../controllers/rifasController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import db from '../config/db.js';
+import { requireVerifiedEmail } from '../middleware/emailVerification.js';
 
 const router = Router();
 
@@ -137,6 +138,7 @@ router.get('/', [
 // Crear nueva rifa
 router.post('/', [
   requireAuth,
+  requireVerifiedEmail,
   requireRole(['admin_global', 'admin_institucion']),
   rifasValidations.crearRifa
 ], rifasController.crearRifa);
@@ -197,6 +199,7 @@ router.post('/:id/numeros/generar', [
 // Comprar múltiples números
 router.post('/:id/comprar', [
   requireAuth,
+  requireVerifiedEmail,
   validarParametrosRifa,
   body('numeros').isArray({ min: 1, max: 10 }).withMessage('Debe seleccionar entre 1 y 10 números'),
   body('numeros.*').isInt({ min: 1 }).withMessage('Los números deben ser enteros positivos'),
@@ -224,6 +227,7 @@ router.post('/:id/verificar-disponibilidad', [
 // Reservar números temporalmente (opcional)
 router.post('/:id/reservar', [
   requireAuth,
+   requireVerifiedEmail,
   validarParametrosRifa,
   body('numeros').isArray({ min: 1 }).withMessage('Debe especificar números'),
   body('tiempo_reserva').optional().isInt({ min: 5, max: 60 }).withMessage('Tiempo de reserva inválido')
@@ -243,6 +247,7 @@ router.post('/:id/cancelar-reserva', [
 // Vender número específico (para vendedores)
 router.post('/:rifa_id/numeros/:numero/vender', [
   requireAuth,
+  requireVerifiedEmail,
   requireRole(['admin_global', 'admin_institucion', 'vendedor']),
   validarParametrosRifa,
   body('comprador_nombre').notEmpty().withMessage('Nombre del comprador requerido'),

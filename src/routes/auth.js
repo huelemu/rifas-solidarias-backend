@@ -1,6 +1,7 @@
 // src/routes/auth.js - CON RUTAS GOOGLE OAUTH AGREGADAS
 
 import express from 'express';
+import { body, validationResult } from 'express-validator';
 import { 
   register, 
   login, 
@@ -12,9 +13,446 @@ import {
   handleGoogleCallback,
   resendVerification
 } from '../controllers/authController.js';
+import { 
+  sendVerificationEmail, 
+  verifyEmailToken 
+} from '../services/emailService.js';
 import { requireAuth } from '../middleware/auth.js';
+import db from '../config/db.js';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
+
 
 const router = express.Router();
+
+
+// =====================================================
+// MODIFICAR EL ENDPOINT DE REGISTRO EXISTENTE
+// =====================================================
+
+/**
+ * POST /auth/register
+ * Modificar tu registro existente para incluir verificación de email
+ */
+router.post('/register', [
+  body('nombre').trim().notEmpty().withMessage('Nombre es requerido'),
+  body('apellido').trim().notEmpty().withMessage('Apellido es requerido'),
+  body('email').isEmail().withMessage('Email inválido'),
+  body('password').isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+], async (req, res) => {
+  try {
+    // Validar errores
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        errors: errors.array()
+      });
+    }
+
+    const { nombre, apellido, email, password, institucion_id } = req.body;
+
+    // Verificar si el email ya existe
+    const [existingUsers] = await db.execute(
+      'SELECT id FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    if (existingUsers.length > 0) {
+      return res.status(409).json({
+        status: 'error',
+        message: 'El email ya está registrado'
+      });
+    }
+
+    // Hash de la contraseña
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Insertar usuario con email_verificado = FALSE
+    const [result] = await db.execute(`
+      INSERT INTO usuarios 
+      (nombre, apellido, email, password, rol, institucion_id, email_verificado) 
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [
+      nombre, 
+      apellido, 
+      email, 
+      hashedPassword, 
+      'comprador', // rol por defecto
+      institucion_id || null,
+      false // 🆕 Email NO verificado por defecto
+    ]);
+
+    const userId = result.insertId;
+
+    // 🆕 ENVIAR EMAIL DE VERIFICACIÓN
+    try {
+      await sendVerificationEmail(email, nombre, userId);
+      console.log(`✅ Email de verificación enviado a ${email}`);
+    } catch (emailError) {
+      // No fallar el registro si el email falla
+      console.error('⚠️ Error enviando email de verificación:', emailError);
+    }
+
+    // Log de registro
+    await db.execute(`
+      INSERT INTO auth_logs (usuario_id, email, accion, ip_address, user_agent)
+      VALUES (?, ?, 'registro', ?, ?)
+    `, [userId, email, req.ip, req.get('user-agent')]);
+
+    res.status(201).json({
+      status: 'success',
+      message: '✅ Usuario registrado exitosamente. Por favor, revisa tu email para verificar tu cuenta.',
+      data: {
+        userId: userId,
+        email: email,
+        nombre: nombre,
+        requiresVerification: true
+      }
+    });
+
+  } catch (error) {
+    console.error('Error en registro:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al registrar usuario'
+    });
+  }
+});
+
+// =====================================================
+// MODIFICAR EL ENDPOINT DE LOGIN EXISTENTE
+// =====================================================
+
+/**
+ * POST /auth/login
+ * Modificar tu login existente para verificar email
+ */
+router.post('/login', [
+  body('email').isEmail().withMessage('Email inválido'),
+  body('password').notEmpty().withMessage('Contraseña es requerida')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        errors: errors.array()
+      });
+    }
+
+    const { email, password } = req.body;
+
+    // Buscar usuario
+    const [users] = await db.execute(
+      'SELECT * FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Credenciales inválidas'
+      });
+    }
+
+    const user = users[0];
+
+    // Verificar contraseña
+    const bcrypt = await import('bcrypt');
+    const isValidPassword = await bcrypt.compare(password, user.password);
+
+    if (!isValidPassword) {
+      // Log de intento fallido
+      await db.execute(`
+        INSERT INTO auth_logs (usuario_id, email, accion, ip_address, user_agent)
+        VALUES (?, ?, 'login_fallido', ?, ?)
+      `, [user.id, email, req.ip, req.get('user-agent')]);
+
+      return res.status(401).json({
+        status: 'error',
+        message: 'Credenciales inválidas'
+      });
+    }
+
+    // 🆕 VERIFICAR SI EL EMAIL ESTÁ VERIFICADO
+    if (!user.email_verificado) {
+      return res.status(403).json({
+        status: 'error',
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Debes verificar tu email antes de iniciar sesión. Revisa tu bandeja de entrada.',
+        data: {
+          email: user.email,
+          canResendVerification: true
+        }
+      });
+    }
+
+    // Verificar si el usuario está bloqueado
+    if (user.estado === 'inactivo') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Tu cuenta está inactiva. Contacta al administrador.'
+      });
+    }
+
+    // Generar tokens (usa tu lógica existente de JWT)
+
+    const accessToken = jwt.sign(
+      { 
+        id: user.id, 
+        email: user.email, 
+        rol: user.rol 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Actualizar último login
+    await db.execute(
+      'UPDATE usuarios SET ultimo_login = NOW() WHERE id = ?',
+      [user.id]
+    );
+
+    // Log de login exitoso
+    await db.execute(`
+      INSERT INTO auth_logs (usuario_id, email, accion, ip_address, user_agent)
+      VALUES (?, ?, 'login_exitoso', ?, ?)
+    `, [user.id, email, req.ip, req.get('user-agent')]);
+
+    res.json({
+      status: 'success',
+      message: 'Login exitoso',
+      data: {
+        user: {
+          id: user.id,
+          nombre: user.nombre,
+          apellido: user.apellido,
+          email: user.email,
+          rol: user.rol,
+          email_verificado: Boolean(user.email_verificado)
+        },
+        tokens: {
+          access_token: accessToken,
+          refresh_token: refreshToken
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error en login:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al iniciar sesión'
+    });
+  }
+});
+
+// =====================================================
+// NUEVO ENDPOINT: VERIFICAR EMAIL
+// =====================================================
+
+/**
+ * GET /auth/verify-email?token=xxx
+ * Verifica el email del usuario usando el token enviado por email
+ */
+router.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token de verificación requerido'
+      });
+    }
+
+    // Verificar token usando el servicio de email
+    const result = await verifyEmailToken(token);
+
+    if (!result.valid) {
+      return res.status(400).json({
+        status: 'error',
+        message: result.message,
+        canResendVerification: result.expired
+      });
+    }
+
+    // Actualizar usuario como verificado
+    await db.execute(`
+      UPDATE usuarios 
+      SET email_verificado = TRUE, 
+          fecha_verificacion = NOW() 
+      WHERE id = ?
+    `, [result.userId]);
+
+    // Marcar token como usado
+    await db.execute(
+      'UPDATE email_verifications SET usado = TRUE WHERE token = ?',
+      [token]
+    );
+
+    // Log de verificación
+    await db.execute(`
+      INSERT INTO auth_logs (usuario_id, accion, ip_address, user_agent)
+      VALUES (?, 'verificacion_email', ?, ?)
+    `, [result.userId, req.ip, req.get('user-agent')]);
+
+    res.json({
+      status: 'success',
+      message: '✅ ¡Email verificado exitosamente! Ya puedes iniciar sesión.',
+      data: {
+        verified: true,
+        userId: result.userId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error verificando email:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al verificar email'
+    });
+  }
+});
+
+
+// =====================================================
+// NUEVO ENDPOINT: REENVIAR VERIFICACIÓN
+// =====================================================
+
+/**
+ * POST /auth/resend-verification
+ * Reenvía el email de verificación
+ */
+router.post('/resend-verification', [
+  body('email').isEmail().withMessage('Email inválido')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        errors: errors.array()
+      });
+    }
+
+    const { email } = req.body;
+
+    // Buscar usuario
+    const [users] = await db.execute(
+      'SELECT id, nombre, email_verificado FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      // Por seguridad, siempre responder lo mismo
+      return res.json({
+        status: 'success',
+        message: 'Si el email existe y no está verificado, recibirás un nuevo link de verificación'
+      });
+    }
+
+    const user = users[0];
+
+    // Si ya está verificado
+    if (user.email_verificado) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Este email ya está verificado. Puedes iniciar sesión.'
+      });
+    }
+
+    // Verificar que no se haya enviado un email recientemente (rate limiting)
+    const [recentEmails] = await db.execute(`
+      SELECT COUNT(*) as count 
+      FROM email_logs 
+      WHERE email = ? 
+        AND tipo = 'verification' 
+        AND fecha_envio > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+    `, [email]);
+
+    if (recentEmails[0].count > 0) {
+      return res.status(429).json({
+        status: 'error',
+        message: 'Ya se envió un email de verificación recientemente. Por favor, espera 5 minutos antes de solicitar otro.'
+      });
+    }
+
+    // Enviar nuevo email de verificación
+    try {
+      await sendVerificationEmail(email, user.nombre, user.id);
+      console.log(`✅ Email de verificación reenviado a ${email}`);
+    } catch (emailError) {
+      console.error('Error reenviando email:', emailError);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Error al enviar el email de verificación'
+      });
+    }
+
+    res.json({
+      status: 'success',
+      message: '✅ Email de verificación enviado. Por favor, revisa tu bandeja de entrada.'
+    });
+
+  } catch (error) {
+    console.error('Error en reenvío de verificación:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al reenviar verificación'
+    });
+  }
+});
+
+// =====================================================
+// NUEVO ENDPOINT: VERIFICAR ESTADO DE EMAIL
+// =====================================================
+
+/**
+ * GET /auth/check-verification/:email
+ * Verifica si un email ya está verificado (útil para el frontend)
+ */
+router.get('/check-verification/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const [users] = await db.execute(
+      'SELECT email_verificado, fecha_verificacion FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    res.json({
+      status: 'success',
+      data: {
+        email: email,
+        verified: Boolean(users[0].email_verificado), // ← Cambiar esta línea
+        verifiedAt: users[0].fecha_verificacion
+      }
+    });
+
+  } catch (error) {
+    console.error('Error verificando estado:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al verificar estado'
+    });
+  }
+});
+
 
 /**
  * @swagger
@@ -360,5 +798,95 @@ router.get('/google/callback', handleGoogleCallback);
  *         description: Usuario no encontrado
  */
 router.post('/resend-verification', resendVerification);
+
+// ENDPOINT 1: Verificar email con token
+router.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token de verificación requerido'
+      });
+    }
+
+    // Importar función de emailService
+    const { verifyEmailToken } = await import('../services/emailService.js');
+    const result = await verifyEmailToken(token);
+
+    if (!result.valid) {
+      return res.status(400).json({
+        status: 'error',
+        message: result.message
+      });
+    }
+
+    // Actualizar usuario como verificado
+    await db.execute(`
+      UPDATE usuarios 
+      SET email_verificado = TRUE, 
+          fecha_verificacion = NOW() 
+      WHERE id = ?
+    `, [result.userId]);
+
+    // Marcar token como usado
+    await db.execute(
+      'UPDATE email_verifications SET usado = TRUE WHERE token = ?',
+      [token]
+    );
+
+    res.json({
+      status: 'success',
+      message: '✅ ¡Email verificado exitosamente! Ya puedes iniciar sesión.',
+      data: {
+        verified: true,
+        userId: result.userId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error verificando email:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al verificar email'
+    });
+  }
+});
+
+// ENDPOINT 2: Verificar estado de verificación
+router.get('/check-verification/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const [users] = await db.execute(
+      'SELECT email_verificado, fecha_verificacion FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    res.json({
+      status: 'success',
+      data: {
+        email: email,
+        verified: Boolean(users[0].email_verificado),
+        verifiedAt: users[0].fecha_verificacion
+      }
+    });
+
+  } catch (error) {
+    console.error('Error verificando estado:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al verificar estado'
+    });
+  }
+});
 
 export default router;
