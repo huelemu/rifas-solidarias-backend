@@ -3,6 +3,7 @@
 import db from '../config/db.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { sendPasswordResetEmail } from '../services/emailService.js';
 
 // =====================================================
 // REGISTER - FUNCIÓN DE REGISTRO
@@ -253,11 +254,12 @@ export const login = async (req, res) => {
       });
     }
 
-    // Buscar usuario por email con información completa
+    // Buscar usuario por email con información completa - INCLUIR google_id
     console.log('🔍 Buscando usuario...');
     const [usuarios] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.password, u.rol, 
              u.estado, u.institucion_id, u.intentos_fallidos, u.bloqueado_hasta,
+             u.google_id,
              i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -273,7 +275,26 @@ export const login = async (req, res) => {
     }
 
     const usuario = usuarios[0];
-    console.log('✅ Usuario encontrado:', { id: usuario.id, rol: usuario.rol, estado: usuario.estado });
+    console.log('✅ Usuario encontrado:', { 
+      id: usuario.id, 
+      rol: usuario.rol, 
+      estado: usuario.estado,
+      google_id: usuario.google_id ? 'SÍ' : 'NO'
+    });
+
+    // ⭐ NUEVA VALIDACIÓN: Verificar si es usuario de Google
+    if (usuario.google_id) {
+      console.log('⚠️ Usuario autenticado con Google intentando login con contraseña');
+      return res.status(400).json({
+        status: 'error',
+        code: 'GOOGLE_AUTH_USER',
+        message: 'Esta cuenta usa autenticación de Google. Por favor, inicia sesión con el botón "Continuar con Google".',
+        data: {
+          authMethod: 'google',
+          email: usuario.email
+        }
+      });
+    }
 
     // Verificar estado del usuario
     if (usuario.estado !== 'activo') {
@@ -332,7 +353,8 @@ export const login = async (req, res) => {
           email: usuario.email,
           rol: usuario.rol,
           institucion_id: usuario.institucion_id,
-          institucion_nombre: usuario.institucion_nombre
+          institucion_nombre: usuario.institucion_nombre,
+          authMethod: 'local' // ⭐ Indicar método de autenticación
         },
         tokens: {
           accessToken,
@@ -500,6 +522,269 @@ export const logout = async (req, res) => {
 
   } catch (error) {
     console.error('Error en logout:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+};
+
+// =====================================================
+// FORGOT PASSWORD - SOLICITAR RESET DE CONTRASEÑA
+// =====================================================
+
+// Actualizar el controlador forgotPassword
+
+export const forgotPassword = async (req, res) => {
+  console.log('\n🔑 ================================');
+  console.log('   SOLICITUD RESET CONTRASEÑA');
+  console.log('🔑 ================================');
+
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Email es requerido'
+      });
+    }
+
+    console.log('📧 Email solicitado:', email);
+
+    // Buscar usuario por email - INCLUIR google_id
+    const [usuarios] = await db.execute(
+      'SELECT id, nombre, email, estado, google_id FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    // Por seguridad, siempre responder con éxito aunque el usuario no exista
+    if (usuarios.length === 0) {
+      console.log('⚠️ Usuario no encontrado, pero respondemos éxito por seguridad');
+      return res.json({
+        status: 'success',
+        message: 'Si el email existe y usa autenticación local, recibirás instrucciones para restablecer tu contraseña'
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    // ⭐ NUEVA VALIDACIÓN: Verificar si es usuario de Google
+    if (usuario.google_id) {
+      console.log('⚠️ Usuario autenticado con Google, no puede cambiar contraseña aquí');
+      return res.status(400).json({
+        status: 'error',
+        code: 'GOOGLE_AUTH_USER',
+        message: 'Esta cuenta usa autenticación de Google. Por favor, inicia sesión con Google para acceder a tu cuenta.',
+        data: {
+          authMethod: 'google',
+          email: usuario.email
+        }
+      });
+    }
+
+    // Verificar que el usuario esté activo
+    if (usuario.estado !== 'activo') {
+      console.log('⚠️ Usuario inactivo');
+      return res.json({
+        status: 'success',
+        message: 'Si el email existe y usa autenticación local, recibirás instrucciones para restablecer tu contraseña'
+      });
+    }
+
+    console.log('✅ Usuario encontrado (autenticación local):', { id: usuario.id, email: usuario.email });
+
+    // Enviar email de reset
+    try {
+      await sendPasswordResetEmail(usuario.email, usuario.nombre, usuario.id);
+      console.log('✅ Email de reset enviado exitosamente');
+
+      res.json({
+        status: 'success',
+        message: 'Te hemos enviado instrucciones para restablecer tu contraseña. Por favor, revisa tu email.'
+      });
+    } catch (emailError) {
+      console.error('❌ Error enviando email:', emailError);
+      
+      // Incluso si falla el email, respondemos éxito por seguridad
+      res.json({
+        status: 'success',
+        message: 'Si el email existe y usa autenticación local, recibirás instrucciones para restablecer tu contraseña'
+      });
+    }
+
+  } catch (error) {
+    console.error('💥 ERROR EN FORGOT PASSWORD:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+};
+
+// =====================================================
+// VALIDATE RESET TOKEN - VALIDAR TOKEN DE RESET
+// =====================================================
+
+export const validateResetToken = async (req, res) => {
+  console.log('\n🔍 ================================');
+  console.log('   VALIDAR TOKEN DE RESET');
+  console.log('🔍 ================================');
+
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token es requerido',
+        valid: false
+      });
+    }
+
+    console.log('🔑 Validando token...');
+
+    // Buscar token en la base de datos
+    const [tokens] = await db.execute(`
+      SELECT 
+        id, usuario_id, expires_at, usado
+      FROM password_resets
+      WHERE token = ? AND usado = FALSE
+    `, [token]);
+
+    if (tokens.length === 0) {
+      console.log('❌ Token no encontrado o ya usado');
+      return res.json({
+        status: 'error',
+        message: 'Token inválido o ya utilizado',
+        valid: false
+      });
+    }
+
+    const resetToken = tokens[0];
+
+    // Verificar si el token ha expirado
+    const now = new Date();
+    const expiresAt = new Date(resetToken.expires_at);
+
+    if (now > expiresAt) {
+      console.log('❌ Token expirado');
+      return res.json({
+        status: 'error',
+        message: 'Token expirado',
+        valid: false
+      });
+    }
+
+    console.log('✅ Token válido');
+
+    res.json({
+      status: 'success',
+      message: 'Token válido',
+      valid: true
+    });
+
+  } catch (error) {
+    console.error('💥 ERROR VALIDANDO TOKEN:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor',
+      valid: false
+    });
+  }
+};
+
+// =====================================================
+// RESET PASSWORD - RESTABLECER CONTRASEÑA
+// =====================================================
+
+export const resetPassword = async (req, res) => {
+  console.log('\n🔐 ================================');
+  console.log('   RESTABLECER CONTRASEÑA');
+  console.log('🔐 ================================');
+
+  try {
+    const { token, newPassword } = req.body;
+
+    // Validaciones
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token y nueva contraseña son requeridos'
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'La contraseña debe tener al menos 6 caracteres'
+      });
+    }
+
+    console.log('🔍 Buscando token...');
+
+    // Buscar y validar token
+    const [tokens] = await db.execute(`
+      SELECT 
+        id, usuario_id, expires_at, usado
+      FROM password_resets
+      WHERE token = ? AND usado = FALSE
+    `, [token]);
+
+    if (tokens.length === 0) {
+      console.log('❌ Token no encontrado o ya usado');
+      return res.status(400).json({
+        status: 'error',
+        message: 'Token inválido o ya utilizado'
+      });
+    }
+
+    const resetToken = tokens[0];
+
+    // Verificar expiración
+    const now = new Date();
+    const expiresAt = new Date(resetToken.expires_at);
+
+    if (now > expiresAt) {
+      console.log('❌ Token expirado');
+      return res.status(400).json({
+        status: 'error',
+        message: 'El token ha expirado. Solicita un nuevo enlace de recuperación.'
+      });
+    }
+
+    console.log('✅ Token válido, actualizando contraseña...');
+
+    // Hash de la nueva contraseña
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Actualizar contraseña del usuario
+    await db.execute(
+      'UPDATE usuarios SET password = ?, fecha_actualizacion = NOW() WHERE id = ?',
+      [hashedPassword, resetToken.usuario_id]
+    );
+
+    // Marcar token como usado
+    await db.execute(
+      'UPDATE password_resets SET usado = TRUE WHERE id = ?',
+      [resetToken.id]
+    );
+
+    console.log('✅ Contraseña actualizada exitosamente');
+
+    // Opcional: Invalidar todas las sesiones activas del usuario
+    await db.execute(
+      'UPDATE usuarios SET refresh_token = NULL WHERE id = ?',
+      [resetToken.usuario_id]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Contraseña restablecida exitosamente'
+    });
+
+  } catch (error) {
+    console.error('💥 ERROR RESTABLECIENDO CONTRASEÑA:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error interno del servidor'
