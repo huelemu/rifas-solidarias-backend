@@ -1419,11 +1419,12 @@ export const rifasValidations = {
       .withMessage('La cantidad de números debe estar entre 10 y 100,000'),
     body('precio_numero').isFloat({ min: 0.01 })
       .withMessage('El precio debe ser mayor a 0'),
-    body('fecha_inicio').isISO8601()
+    body('fecha_inicio').matches(/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/)
       .withMessage('Fecha de inicio inválida'),
-    body('fecha_fin').isISO8601()
+    body('fecha_fin').matches(/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/)
       .withMessage('Fecha de fin inválida'),
-    body('fecha_sorteo').isISO8601()
+    body('fecha_sorteo').optional({ nullable: true, checkFalsy: true })
+      .matches(/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/)
       .withMessage('Fecha de sorteo inválida'),
     body('institucion_promotora_id').isInt({ min: 1 })
       .withMessage('ID de institución inválido')
