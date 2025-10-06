@@ -9,6 +9,7 @@ import rifasController, { rifasValidations } from '../controllers/rifasControlle
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import db from '../config/db.js';
 import { requireVerifiedEmail } from '../middleware/emailVerification.js';
+import { uploadRifaImage } from '../config/upload.js';
 
 const router = Router();
 
@@ -167,6 +168,24 @@ router.delete('/:id', [
   verificarPermisoRifa,
   body('motivo').optional().isLength({ min: 3, max: 200 })
 ], rifasController.eliminarRifa);
+
+
+// **NUEVO: Subir imagen de rifa**
+router.post(
+  '/:id/upload-imagen',
+  authMiddleware,
+  checkRole(['admin_global', 'admin_institucion']),
+  uploadRifaImage.single('imagen'), // 'imagen' es el nombre del campo
+  rifasController.uploadImagenRifa
+);
+
+// **NUEVO: Eliminar imagen de rifa**
+router.delete(
+  '/:id/imagen',
+  authMiddleware,
+  checkRole(['admin_global', 'admin_institucion']),
+  rifasController.deleteImagenRifa
+);
 
 // =====================================================
 // GESTIÓN DE NÚMEROS

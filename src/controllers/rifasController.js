@@ -5,6 +5,12 @@
 
 import db from '../config/db.js';
 import { body, validationResult } from 'express-validator';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const rifasController = {
 
@@ -1402,6 +1408,159 @@ const rifasController = {
       console.error('❌ Error generando números para rifa:', error);
       throw error;
     }
+  }
+};
+
+/**
+ * Subir imagen de rifa
+ * POST /api/rifas/:id/upload-imagen
+ */
+export const uploadImagenRifa = async (req, res) => {
+  try {
+    const rifaId = parseInt(req.params.id);
+    const userId = req.user.id;
+    
+    console.log('📤 Upload imagen rifa - ID:', rifaId, 'Usuario:', userId);
+    
+    if (!req.file) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No se proporcionó ningún archivo'
+      });
+    }
+    
+    // Verificar que la rifa existe
+    const rifa = await Rifa.obtenerPorId(rifaId);
+    if (!rifa) {
+      // Eliminar archivo subido
+      fs.unlinkSync(req.file.path);
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada'
+      });
+    }
+    
+    // Verificar permisos
+    const user = req.user;
+    const canUpload = user.role === 'admin_global' || 
+                     (user.role === 'admin_institucion' && rifa.institucion_promotora_id === user.institucion_id);
+    
+    if (!canUpload) {
+      fs.unlinkSync(req.file.path);
+      return res.status(403).json({
+        status: 'error',
+        message: 'No tienes permisos para subir imagen a esta rifa'
+      });
+    }
+    
+    // Si la rifa ya tiene imagen, eliminar la anterior
+    if (rifa.imagen_url) {
+      const oldImagePath = path.join(__dirname, '../../', rifa.imagen_url);
+      if (fs.existsSync(oldImagePath)) {
+        fs.unlinkSync(oldImagePath);
+        console.log('🗑️ Imagen anterior eliminada:', oldImagePath);
+      }
+    }
+    
+    // Guardar nueva URL en la base de datos
+    const newImageUrl = `/uploads/rifas/${req.file.filename}`;
+    
+    await db.execute(
+      'UPDATE rifas SET imagen_url = ?, fecha_actualizacion = NOW() WHERE id = ?',
+      [newImageUrl, rifaId]
+    );
+    
+    console.log('✅ Imagen de rifa actualizada:', newImageUrl);
+    
+    res.json({
+      status: 'success',
+      message: 'Imagen subida exitosamente',
+      imagen_url: newImageUrl
+    });
+    
+  } catch (error) {
+    console.error('❌ Error al subir imagen de rifa:', error);
+    
+    // Eliminar archivo si hubo error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al subir imagen',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Eliminar imagen de rifa
+ * DELETE /api/rifas/:id/imagen
+ */
+export const deleteImagenRifa = async (req, res) => {
+  try {
+    const rifaId = parseInt(req.params.id);
+    const userId = req.user.id;
+    
+    console.log('🗑️ Eliminar imagen rifa - ID:', rifaId, 'Usuario:', userId);
+    
+    // Verificar que la rifa existe
+    const rifa = await Rifa.obtenerPorId(rifaId);
+    if (!rifa) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada'
+      });
+    }
+    
+    // Verificar permisos
+    const user = req.user;
+    const canDelete = user.role === 'admin_global' || 
+                     (user.role === 'admin_institucion' && rifa.institucion_promotora_id === user.institucion_id);
+    
+    if (!canDelete) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'No tienes permisos para eliminar la imagen de esta rifa'
+      });
+    }
+    
+    // Verificar que la rifa tiene imagen
+    if (!rifa.imagen_url) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'La rifa no tiene imagen'
+      });
+    }
+    
+    // Eliminar archivo físico
+    const imagePath = path.join(__dirname, '../../', rifa.imagen_url);
+    if (fs.existsSync(imagePath)) {
+      fs.unlinkSync(imagePath);
+      console.log('✅ Archivo de imagen eliminado:', imagePath);
+    }
+    
+    // Actualizar base de datos
+    await db.execute(
+      'UPDATE rifas SET imagen_url = NULL, fecha_actualizacion = NOW() WHERE id = ?',
+      [rifaId]
+    );
+    
+    console.log('✅ imagen_url establecida a NULL en BD');
+    
+    res.json({
+      status: 'success',
+      message: 'Imagen eliminada exitosamente'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error al eliminar imagen de rifa:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al eliminar imagen',
+      error: error.message
+    });
   }
 };
 
