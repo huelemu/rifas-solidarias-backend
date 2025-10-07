@@ -195,10 +195,24 @@ const rifasController = {
     }
   },
 
-  async crearRifa(req, res) {
+//-- Crea la Rifa con los numeros --//
+
+ async crearRifa(req, res) {
   try {
-    console.log('📥 Crear rifa - Body recibido:', req.body);
-    console.log('👤 Usuario:', req.user);
+    console.log('\n📝 === CREAR RIFA ===');
+    console.log('Usuario:', req.user);
+    console.log('Body recibido:', req.body);
+
+    // Validar datos
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.log('❌ Errores de validación:', errors.array());
+      return res.status(400).json({
+        status: 'error',
+        message: 'Datos inválidos',
+        errors: errors.array()
+      });
+    }
 
     const {
       nombre,
@@ -214,82 +228,114 @@ const rifasController = {
 
     const creado_por = req.user.id;
 
-    // Validaciones básicas
-    if (!nombre || !institucion_promotora_id || !cantidad_numeros || !precio_numero || !fecha_inicio || !fecha_fin) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Faltan campos obligatorios: nombre, institucion_promotora_id, cantidad_numeros, precio_numero, fecha_inicio, fecha_fin'
-      });
-    }
-
-    // Verificar que existe la institución
+    // Verificar que la institución existe
     const [instituciones] = await db.execute(
-      'SELECT id, nombre FROM instituciones WHERE id = ?',
+      'SELECT id FROM instituciones WHERE id = ?',
       [institucion_promotora_id]
     );
 
     if (instituciones.length === 0) {
-      return res.status(400).json({
+      return res.status(404).json({
         status: 'error',
-        message: `La institución con ID ${institucion_promotora_id} no existe`
+        message: 'Institución no encontrada'
       });
     }
 
-    console.log('✅ Institución encontrada:', instituciones[0]);
+    // Verificar permisos
+    if (req.user.rol !== 'admin_global' && 
+        req.user.institucion_id !== parseInt(institucion_promotora_id)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'No tienes permisos para crear rifas para esta institución'
+      });
+    }
 
-    // ✅ INSERT SOLO CON CAMPOS BÁSICOS
-    const insertQuery = `
-      INSERT INTO rifas (
-        nombre, 
-        descripcion, 
-        institucion_promotora_id, 
-        cantidad_numeros,
-        precio_numero, 
-        fecha_inicio, 
-        fecha_fin, 
-        fecha_sorteo,
-        estado, 
-        creado_por, 
-        imagen_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'borrador', ?, ?)
-    `;
+    // ✅ INICIAR TRANSACCIÓN
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
 
-    const valores = [
-      nombre,
-      descripcion || null,
-      parseInt(institucion_promotora_id),
-      parseInt(cantidad_numeros),
-      parseFloat(precio_numero),
-      fecha_inicio,
-      fecha_fin,
-      fecha_sorteo || null,
-      creado_por,
-      imagen_url || null
-    ];
+    try {
+      // PASO 1: Crear la rifa
+      const insertQuery = `
+        INSERT INTO rifas (
+          nombre, descripcion, institucion_promotora_id, cantidad_numeros, precio_numero,
+          fecha_inicio, fecha_fin, fecha_sorteo, creado_por, imagen_url, estado
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
+      `;
 
-    console.log('📝 Valores a insertar:', valores);
+      const valores = [
+        nombre,
+        descripcion || null,
+        parseInt(institucion_promotora_id),
+        parseInt(cantidad_numeros),
+        parseFloat(precio_numero),
+        fecha_inicio,
+        fecha_fin,
+        fecha_sorteo || null,
+        creado_por,
+        imagen_url || null
+      ];
 
-    const [result] = await db.execute(insertQuery, valores);
-    const rifa_id = result.insertId;
+      console.log('📝 Insertando rifa...');
+      const [result] = await connection.execute(insertQuery, valores);
+      const rifa_id = result.insertId;
+      console.log('✅ Rifa creada con ID:', rifa_id);
 
-    console.log('✅ Rifa creada con ID:', rifa_id);
+      // PASO 2: Generar números automáticamente
+      console.log(`🎲 Generando ${cantidad_numeros} números...`);
+      
+      const numeros = [];
+      for (let i = 1; i <= cantidad_numeros; i++) {
+        const qrCode = `RIFA${rifa_id}-${String(i).padStart(6, '0')}-${Date.now()}`;
+        numeros.push([rifa_id, i, 'disponible', qrCode]);
+      }
 
-    // Obtener rifa completa
-    const [rifaCreada] = await db.execute(`
-      SELECT 
-        r.*,
-        i.nombre as institucion_promotora_nombre
-      FROM rifas r
-      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
-      WHERE r.id = ?
-    `, [rifa_id]);
+      // Insertar números en bloques de 500 para mejor rendimiento
+      const batchSize = 500;
+      for (let i = 0; i < numeros.length; i += batchSize) {
+        const batch = numeros.slice(i, i + batchSize);
+        const placeholders = batch.map(() => '(?, ?, ?, ?)').join(', ');
+        
+        await connection.execute(`
+          INSERT INTO numeros_rifa (rifa_id, numero, estado, qr_code) 
+          VALUES ${placeholders}
+        `, batch.flat());
+      }
 
-    res.status(201).json({
-      status: 'success',
-      message: 'Rifa creada exitosamente',
-      data: rifaCreada[0],
-      id: rifa_id
-    });
+      console.log(`✅ ${cantidad_numeros} números generados correctamente`);
+
+      // PASO 3: Obtener rifa completa con estadísticas
+      const [rifaCreada] = await connection.execute(`
+        SELECT 
+          r.*,
+          i.nombre as institucion_promotora_nombre,
+          COUNT(nr.id) as total_numeros_generados
+        FROM rifas r
+        LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+        LEFT JOIN numeros_rifa nr ON r.id = nr.rifa_id
+        WHERE r.id = ?
+        GROUP BY r.id
+      `, [rifa_id]);
+
+      // ✅ COMMIT de la transacción
+      await connection.commit();
+      connection.release();
+
+      console.log('✅ Rifa y números creados exitosamente');
+      
+      res.status(201).json({
+        status: 'success',
+        message: `Rifa creada exitosamente con ${cantidad_numeros} números generados`,
+        data: rifaCreada[0],
+        id: rifa_id
+      });
+
+    } catch (error) {
+      // ❌ ROLLBACK en caso de error
+      await connection.rollback();
+      connection.release();
+      throw error;
+    }
 
   } catch (error) {
     console.error('❌ Error al crear rifa:', error);
