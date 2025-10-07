@@ -8,6 +8,7 @@ import { body, validationResult } from 'express-validator';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { Rifa } from '../models/Rifa.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -195,99 +196,111 @@ const rifasController = {
   },
 
   async crearRifa(req, res) {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Datos inválidos',
-          errors: errors.array()
-        });
-      }
+  try {
+    console.log('📥 Crear rifa - Body recibido:', req.body);
+    console.log('👤 Usuario:', req.user);
 
-      const {
-        nombre,
-        descripcion,
-        cantidad_numeros,
-        precio_numero,
-        fecha_inicio,
-        fecha_fin,
-        fecha_sorteo,
-        institucion_promotora_id,
-        imagen_url,
-        reglas_adicionales
-      } = req.body;
+    const {
+      nombre,
+      descripcion,
+      institucion_promotora_id,
+      cantidad_numeros,
+      precio_numero,
+      fecha_inicio,
+      fecha_fin,
+      fecha_sorteo,
+      imagen_url
+    } = req.body;
 
-      const creado_por = req.user.id;
+    const creado_por = req.user.id;
 
-      if (new Date(fecha_inicio) >= new Date(fecha_fin)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'La fecha de inicio debe ser anterior a la fecha de fin'
-        });
-      }
-
-      if (fecha_sorteo && new Date(fecha_sorteo) <= new Date(fecha_fin)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'La fecha de sorteo debe ser posterior a la fecha de fin'
-        });
-      }
-
-      if (req.user.rol !== 'admin_global' && req.user.institucion_id !== institucion_promotora_id) {
-        return res.status(403).json({
-          status: 'error',
-          message: 'No tienes permisos para crear rifas para esta institución'
-        });
-      }
-
-      const insertQuery = `
-        INSERT INTO rifas (
-          nombre, descripcion, cantidad_numeros, precio_numero,
-          fecha_inicio, fecha_fin, fecha_sorteo,
-          institucion_promotora_id, creado_por, imagen_url, reglas_adicionales
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
-      const [result] = await db.execute(insertQuery, [
-        nombre,
-        descripcion,
-        cantidad_numeros,
-        precio_numero,
-        fecha_inicio,
-        fecha_fin,
-        fecha_sorteo,
-        institucion_promotora_id,
-        creado_por,
-        imagen_url,
-        reglas_adicionales
-      ]);
-
-      const rifa_id = result.insertId;
-      await rifasController._generarNumerosParaRifa(rifa_id, cantidad_numeros);
-
-      const [rifaCreada] = await db.execute(`
-        SELECT r.*, i.nombre as institucion_nombre
-        FROM rifas r
-        LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
-        WHERE r.id = ?
-      `, [rifa_id]);
-
-      res.status(201).json({
-        status: 'success',
-        message: 'Rifa creada exitosamente',
-        data: rifaCreada[0]
-      });
-
-    } catch (error) {
-      console.error('Error al crear rifa:', error);
-      res.status(500).json({
+    // Validaciones básicas
+    if (!nombre || !institucion_promotora_id || !cantidad_numeros || !precio_numero || !fecha_inicio || !fecha_fin) {
+      return res.status(400).json({
         status: 'error',
-        message: 'Error interno del servidor'
+        message: 'Faltan campos obligatorios: nombre, institucion_promotora_id, cantidad_numeros, precio_numero, fecha_inicio, fecha_fin'
       });
     }
-  },
+
+    // Verificar que existe la institución
+    const [instituciones] = await db.execute(
+      'SELECT id, nombre FROM instituciones WHERE id = ?',
+      [institucion_promotora_id]
+    );
+
+    if (instituciones.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: `La institución con ID ${institucion_promotora_id} no existe`
+      });
+    }
+
+    console.log('✅ Institución encontrada:', instituciones[0]);
+
+    // ✅ INSERT SOLO CON CAMPOS BÁSICOS
+    const insertQuery = `
+      INSERT INTO rifas (
+        nombre, 
+        descripcion, 
+        institucion_promotora_id, 
+        cantidad_numeros,
+        precio_numero, 
+        fecha_inicio, 
+        fecha_fin, 
+        fecha_sorteo,
+        estado, 
+        creado_por, 
+        imagen_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'borrador', ?, ?)
+    `;
+
+    const valores = [
+      nombre,
+      descripcion || null,
+      parseInt(institucion_promotora_id),
+      parseInt(cantidad_numeros),
+      parseFloat(precio_numero),
+      fecha_inicio,
+      fecha_fin,
+      fecha_sorteo || null,
+      creado_por,
+      imagen_url || null
+    ];
+
+    console.log('📝 Valores a insertar:', valores);
+
+    const [result] = await db.execute(insertQuery, valores);
+    const rifa_id = result.insertId;
+
+    console.log('✅ Rifa creada con ID:', rifa_id);
+
+    // Obtener rifa completa
+    const [rifaCreada] = await db.execute(`
+      SELECT 
+        r.*,
+        i.nombre as institucion_promotora_nombre
+      FROM rifas r
+      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+      WHERE r.id = ?
+    `, [rifa_id]);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Rifa creada exitosamente',
+      data: rifaCreada[0],
+      id: rifa_id
+    });
+
+  } catch (error) {
+    console.error('❌ Error al crear rifa:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al crear la rifa',
+      error: error.message,
+      sqlMessage: error.sqlMessage
+    });
+  }
+},
 
   async actualizarRifa(req, res) {
     try {
@@ -1639,5 +1652,265 @@ export const rifasValidations = {
       .withMessage('Número final inválido')
   ]
 };
+
+/**
+ * POST /rifas/:id/logo - Subir logo de rifa
+ */
+export const subirLogoRifa = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Verificar que existe la rifa
+    const [rifas] = await db.execute(
+      'SELECT id, logo_url FROM rifas WHERE id = ?',
+      [id]
+    );
+
+    if (rifas.length === 0) {
+      // Eliminar archivo subido si la rifa no existe
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No se proporcionó ningún archivo'
+      });
+    }
+
+    // Eliminar logo anterior si existe
+    const oldLogoUrl = rifas[0].logo_url;
+    if (oldLogoUrl) {
+      const oldLogoPath = path.join(__dirname, '../../', oldLogoUrl);
+      if (fs.existsSync(oldLogoPath)) {
+        fs.unlinkSync(oldLogoPath);
+      }
+    }
+
+    // Construir URL del nuevo logo
+    const logoUrl = `/uploads/rifas/${req.file.filename}`;
+
+    // Actualizar en la base de datos
+    await db.execute(
+      'UPDATE rifas SET logo_url = ?, fecha_actualizacion = NOW() WHERE id = ?',
+      [logoUrl, id]
+    );
+
+    // Obtener rifa actualizada
+    const [rifaActualizada] = await db.execute(
+      'SELECT * FROM rifas WHERE id = ?',
+      [id]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Logo subido exitosamente',
+      data: {
+        rifa: rifaActualizada[0],
+        logo_url: logoUrl
+      }
+    });
+
+  } catch (error) {
+    // Limpiar archivo en caso de error
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    console.error('❌ Error al subir logo de rifa:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al subir logo',
+      error: error.message
+    });
+  }
+};
+
+
+/**
+ * DELETE /rifas/:id/logo - Eliminar logo de rifa
+ */
+export const eliminarLogoRifa = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rifas] = await db.execute(
+      'SELECT logo_url FROM rifas WHERE id = ?',
+      [id]
+    );
+
+    if (rifas.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada'
+      });
+    }
+
+    const logoUrl = rifas[0].logo_url;
+
+    if (!logoUrl) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'La rifa no tiene logo'
+      });
+    }
+
+    // Eliminar archivo físico
+    const logoPath = path.join(__dirname, '../../', logoUrl);
+    if (fs.existsSync(logoPath)) {
+      fs.unlinkSync(logoPath);
+    }
+
+    // Actualizar base de datos
+    await db.execute(
+      'UPDATE rifas SET logo_url = NULL, fecha_actualizacion = NOW() WHERE id = ?',
+      [id]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Logo eliminado exitosamente'
+    });
+
+  } catch (error) {
+    console.error('❌ Error al eliminar logo de rifa:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al eliminar logo',
+      error: error.message
+    });
+  }
+};
+
+// =====================================================
+// GESTIÓN DE PARTICIPACIONES / INVITACIONES DE INSTITUCIONES
+// =====================================================
+
+rifasController.invitarInstituciones = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { instituciones_ids } = req.body;
+    const userId = req.user?.id || null;
+
+    if (!Array.isArray(instituciones_ids) || instituciones_ids.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Debe enviar un listado de instituciones a invitar'
+      });
+    }
+
+    // Verificar que exista la rifa
+    const [rifas] = await db.execute('SELECT id FROM rifas WHERE id = ?', [id]);
+    if (rifas.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Rifa no encontrada' });
+    }
+
+    // Registrar invitaciones evitando duplicados
+    const values = instituciones_ids.map(instId => [id, instId, 'pendiente', userId]);
+    const placeholders = values.map(() => '(?, ?, ?, ?)').join(', ');
+
+    await db.execute(
+      `INSERT INTO rifa_participaciones (rifa_id, institucion_id, estado, invitado_por)
+       VALUES ${placeholders}
+       ON DUPLICATE KEY UPDATE estado = 'pendiente', fecha_solicitud = NOW()`,
+      values.flat()
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Instituciones invitadas exitosamente',
+      data: { total_invitadas: instituciones_ids.length }
+    });
+  } catch (error) {
+    console.error('❌ Error al invitar instituciones:', error);
+    res.status(500).json({ status: 'error', message: 'Error interno al invitar instituciones' });
+  }
+};
+
+rifasController.obtenerParticipaciones = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [participaciones] = await db.execute(`
+      SELECT rp.*, i.nombre as institucion_nombre, i.logo_url as institucion_logo
+      FROM rifa_participaciones rp
+      LEFT JOIN instituciones i ON rp.institucion_id = i.id
+      WHERE rp.rifa_id = ?
+      ORDER BY rp.fecha_solicitud DESC
+    `, [id]);
+
+    res.json({
+      status: 'success',
+      data: participaciones
+    });
+  } catch (error) {
+    console.error('❌ Error al obtener participaciones:', error);
+    res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+  }
+};
+
+rifasController.aprobarParticipacion = async (req, res) => {
+  try {
+    const { id, participacionId } = req.params;
+
+    await db.execute(
+      `UPDATE rifa_participaciones
+       SET estado = 'aprobada', fecha_respuesta = NOW()
+       WHERE id = ? AND rifa_id = ?`,
+      [participacionId, id]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Participación aprobada exitosamente'
+    });
+  } catch (error) {
+    console.error('❌ Error al aprobar participación:', error);
+    res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+  }
+};
+
+rifasController.rechazarParticipacion = async (req, res) => {
+  try {
+    const { id, participacionId } = req.params;
+    const { motivo } = req.body || {};
+
+    await db.execute(
+      `UPDATE rifa_participaciones
+       SET estado = 'rechazada', motivo_rechazo = ?, fecha_respuesta = NOW()
+       WHERE id = ? AND rifa_id = ?`,
+      [motivo || 'Rechazada por administrador', participacionId, id]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Participación rechazada exitosamente'
+    });
+  } catch (error) {
+    console.error('❌ Error al rechazar participación:', error);
+    res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+  }
+};
+
+rifasController.retirarParticipacion = async (req, res) => {
+  try {
+    const { id, participacionId } = req.params;
+    await db.execute('DELETE FROM rifa_participaciones WHERE id = ? AND rifa_id = ?', [participacionId, id]);
+
+    res.json({
+      status: 'success',
+      message: 'Participación retirada exitosamente'
+    });
+  } catch (error) {
+    console.error('❌ Error al retirar participación:', error);
+    res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+  }
+};
+
 
 export default rifasController;
