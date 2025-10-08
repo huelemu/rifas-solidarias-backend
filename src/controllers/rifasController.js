@@ -129,25 +129,73 @@ const rifasController = {
     }
   },
 
-  async comprarNumeros(req, res) {
-    try {
-      const { id } = req.params;
-      const { numeros } = req.body;
-      if (!Array.isArray(numeros) || numeros.length === 0)
-        return res.status(400).json({ status: 'error', message: 'Debe seleccionar al menos un número' });
+  // =====================================================
+// COMPRAR NÚMEROS
+// =====================================================
+async comprarNumeros(req, res) {
+  try {
+    const { id } = req.params;
+    const { numeros, comprador_info, metodo_pago, observaciones } = req.body;
 
-      const placeholders = numeros.map(() => '?').join(',');
-      await db.execute(
-        `UPDATE numeros_rifa SET estado='vendido', fecha_venta=NOW() WHERE rifa_id=? AND numero IN (${placeholders})`,
-        [id, ...numeros]
-      );
-
-      res.json({ status: 'success', message: 'Números comprados exitosamente', total: numeros.length });
-    } catch (error) {
-      console.error('Error al comprar números:', error);
-      res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+    if (!Array.isArray(numeros) || numeros.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Debe seleccionar al menos un número'
+      });
     }
-  },
+
+    // Verificar existencia y disponibilidad
+    const [disponibles] = await db.execute(
+      `SELECT numero FROM numeros_rifa WHERE rifa_id = ? AND numero IN (${numeros.map(() => '?').join(',')}) AND estado = 'disponible'`,
+      [id, ...numeros]
+    );
+
+    if (disponibles.length !== numeros.length) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Uno o más números ya no están disponibles'
+      });
+    }
+
+    // Obtener precio por número
+    const [r] = await db.execute('SELECT precio_numero FROM rifas WHERE id = ?', [id]);
+    const precioNumero = r[0]?.precio_numero || 0;
+    const totalPagado = precioNumero * numeros.length;
+
+    // Actualizar los números como vendidos
+    const placeholders = numeros.map(() => '?').join(',');
+    await db.execute(
+      `UPDATE numeros_rifa 
+       SET estado='vendido', fecha_venta=NOW(), comprador_nombre=?, comprador_telefono=?, metodo_pago=?, observaciones=?
+       WHERE rifa_id=? AND numero IN (${placeholders})`,
+      [
+        `${comprador_info?.nombre || ''} ${comprador_info?.apellido || ''}`.trim(),
+        comprador_info?.telefono || '',
+        metodo_pago || '',
+        observaciones || '',
+        id,
+        ...numeros
+      ]
+    );
+
+    // ✅ Nueva estructura compatible con el frontend
+    res.json({
+      status: 'success',
+      message: 'Números comprados exitosamente',
+      data: {
+        numeros_comprados: numeros,
+        total_pagado: totalPagado
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al comprar números:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor'
+    });
+  }
+},
 
   async venderNumero(req, res) {
     try {
