@@ -1,167 +1,115 @@
-// archivo: src/routes/rifas.js
+// =====================================================
+// RUTAS PARA EL SISTEMA DE RIFAS
+// =====================================================
+
 import { Router } from 'express';
-import { body, param, query } from 'express-validator';
-import rifasController, { rifasValidations } from '../controllers/rifasController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { uploadLogoRifa } from '../config/upload.js';
-import db from '../config/db.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-console.log('🔍 Funciones disponibles en rifasController:', Object.keys(rifasController));
-
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import rifasController, { rifasValidations } from '../controllers/rifasController.js';
 
 const router = Router();
-
+console.log('🧩 Métodos disponibles:', Object.keys(rifasController));
 // ========================================
-// LOGO DE LA RIFA
+// CRUD DE RIFAS
 // ========================================
-
-router.post('/:id/logo', 
-  requireAuth, 
-  requireRole(['admin_global', 'admin_institucion']), 
-  uploadLogoRifa.single('logo'),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      console.log('📤 Subiendo logo para rifa ID:', id);
-
-      if (!req.file) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'No se proporcionó ningún archivo'
-        });
-      }
-
-      const [rifas] = await db.execute('SELECT id FROM rifas WHERE id = ?', [id]);
-      if (rifas.length === 0) {
-        fs.unlinkSync(req.file.path);
-        return res.status(404).json({ status: 'error', message: 'Rifa no encontrada' });
-      }
-
-      const logoUrl = `/uploads/rifas/${req.file.filename}`;
-      await db.execute('UPDATE rifas SET imagen_url = ? WHERE id = ?', [logoUrl, id]);
-
-      console.log('✅ Logo subido exitosamente:', logoUrl);
-
-      res.json({
-        status: 'success',
-        message: 'Logo subido exitosamente',
-        data: { logo_url: logoUrl }
-      });
-
-    } catch (error) {
-      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      console.error('❌ Error al subir logo:', error);
-      res.status(500).json({ status: 'error', message: 'Error al subir logo', error: error.message });
-    }
-  }
-);
-
-router.delete('/:id/logo',
-  requireAuth,
-  requireRole(['admin_global', 'admin_institucion']),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      console.log('🗑️ Eliminando logo de rifa ID:', id);
-
-      const [rifas] = await db.execute('SELECT imagen_url FROM rifas WHERE id = ?', [id]);
-      if (rifas.length === 0)
-        return res.status(404).json({ status: 'error', message: 'Rifa no encontrada' });
-
-      const logoUrl = rifas[0].imagen_url;
-      if (!logoUrl)
-        return res.status(400).json({ status: 'error', message: 'La rifa no tiene logo' });
-
-      const uploadsDir = path.join(__dirname, '../../uploads/rifas');
-      const extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-      extensions.forEach(ext => {
-        const filePath = path.join(uploadsDir, `rifa_${id}${ext}`);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log('🗑️ Logo eliminado:', filePath);
-        }
-      });
-
-      await db.execute('UPDATE rifas SET imagen_url = NULL WHERE id = ?', [id]);
-
-      console.log('✅ Logo eliminado exitosamente');
-      res.json({ status: 'success', message: 'Logo eliminado exitosamente' });
-
-    } catch (error) {
-      console.error('❌ Error al eliminar logo:', error);
-      res.status(500).json({ status: 'error', message: 'Error al eliminar logo', error: error.message });
-    }
-  }
-);
-
-// ========================================
-// RUTAS PÚBLICAS
-// ========================================
-
 router.get('/', rifasController.listarRifas);
 router.get('/:id', rifasController.obtenerRifa);
 
-// ========================================
-// RUTAS PROTEGIDAS (CRUD DE RIFAS)
-// ========================================
-
-router.post('/', 
-  requireAuth, 
+router.post(
+  '/',
+  requireAuth,
   requireRole(['admin_global', 'admin_institucion']),
   rifasValidations.crearRifa,
   rifasController.crearRifa
 );
 
-router.put('/:id', 
-  requireAuth, 
+router.put(
+  '/:id',
+  requireAuth,
   requireRole(['admin_global', 'admin_institucion']),
   rifasValidations.actualizarRifa,
   rifasController.actualizarRifa
 );
 
-router.delete('/:id', 
-  requireAuth, 
-  requireRole(['admin_global']), 
+router.delete(
+  '/:id',
+  requireAuth,
+  requireRole(['admin_global']),
   rifasController.eliminarRifa
 );
 
 // ========================================
-// NUEVAS RUTAS - PARTICIPACIONES / INVITACIONES
+// GESTIÓN DE NÚMEROS
 // ========================================
 
-router.post('/:id/invitar', 
-  requireAuth, 
-  requireRole(['admin_global', 'admin_institucion']), 
-  rifasController.invitarInstituciones
+router.post(
+  '/:id/generar-numeros',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  rifasController.generarNumerosRifa
 );
 
-router.get('/:id/participaciones', 
-  requireAuth, 
-  rifasController.obtenerParticipaciones
+router.get('/:id/numeros', requireAuth, rifasController.obtenerNumerosRifa);
+
+router.post(
+  '/:id/comprar',
+  requireAuth,
+  rifasValidations.comprarNumeros,
+  rifasController.comprarNumeros
 );
 
-router.put('/:id/participaciones/:participacionId/aprobar', 
-  requireAuth, 
-  requireRole(['admin_global', 'admin_institucion']), 
-  rifasController.aprobarParticipacion
+router.post(
+  '/:rifa_id/numeros/:numero/vender',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion', 'vendedor']),
+  rifasValidations.venderNumero,
+  rifasController.venderNumero
 );
 
-router.put('/:id/participaciones/:participacionId/rechazar', 
-  requireAuth, 
-  requireRole(['admin_global', 'admin_institucion']), 
-  rifasController.rechazarParticipacion
+router.post(
+  '/:rifa_id/numeros/:numero/reservar',
+  requireAuth,
+  rifasController.reservarNumero
 );
 
-router.delete('/:id/participaciones/:participacionId', 
-  requireAuth, 
-  rifasController.retirarParticipacion
+router.delete(
+  '/:rifa_id/numeros/:numero/venta',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  rifasController.cancelarVentaNumero
+);
+
+// ========================================
+// MIS RIFAS Y NÚMEROS
+// ========================================
+
+router.get('/usuario/mis-rifas', requireAuth, rifasController.obtenerMisRifas);
+
+router.get('/:id/mis-numeros', requireAuth, rifasController.obtenerMisNumeros);
+
+// ========================================
+// ADMINISTRACIÓN DE NÚMEROS
+// ========================================
+
+router.post(
+  '/:id/asignar-numeros',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  rifasValidations.asignarNumeros,
+  rifasController.asignarNumeros
+);
+
+router.get(
+  '/:rifa_id/instituciones/:institucion_id/numeros',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  rifasController.obtenerNumerosInstitucion
+);
+
+router.get(
+  '/:rifa_id/vendedor/numeros',
+  requireAuth,
+  requireRole(['vendedor', 'admin_institucion', 'admin_global']),
+  rifasController.obtenerNumerosVendedor
 );
 
 export default router;
