@@ -1,4 +1,8 @@
-// src/routes/usuarios.js - Con documentación Swagger completa
+// =====================================================
+// RUTAS DE USUARIOS
+// src/routes/usuarios.js
+// =====================================================
+
 import express from 'express';
 import { 
   obtenerUsuarios, 
@@ -8,209 +12,56 @@ import {
   eliminarUsuario 
 } from '../controllers/usuariosController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-
 import { ROLES } from '../constants/roles.js';
 
 const router = express.Router();
 
-/**
- * @swagger
- * components:
- *   schemas:
- *     Usuario:
- *       type: object
- *       required:
- *         - nombre
- *         - apellido
- *         - email
- *         - password
- *         - rol
- *       properties:
- *         id:
- *           type: integer
- *           description: ID único del usuario
- *           example: 1
- *         nombre:
- *           type: string
- *           description: Nombre del usuario
- *           example: Juan
- *         apellido:
- *           type: string
- *           description: Apellido del usuario
- *           example: Pérez
- *         email:
- *           type: string
- *           format: email
- *           description: Email del usuario
- *           example: juan.perez@ejemplo.com
- *         telefono:
- *           type: string
- *           description: Teléfono de contacto
- *           example: "+5491123456789"
- *         dni:
- *           type: string
- *           description: Documento Nacional de Identidad
- *           example: "12345678"
- *         rol:
- *           type: string
- *           enum: [admin_global, admin_institucion, vendedor, comprador]
- *           description: Rol del usuario en el sistema
- *           example: comprador
- *         estado:
- *           type: string
- *           enum: [activo, inactivo, bloqueado]
- *           description: Estado del usuario
- *           example: activo
- *         institucion_id:
- *           type: integer
- *           description: ID de la institución a la que pertenece
- *           example: 1
- *         institucion_nombre:
- *           type: string
- *           description: Nombre de la institución
- *           example: Cruz Roja Argentina
- *         ultimo_login:
- *           type: string
- *           format: date-time
- *           description: Fecha del último login
- *         fecha_creacion:
- *           type: string
- *           format: date-time
- *           description: Fecha de creación del usuario
- *         fecha_actualizacion:
- *           type: string
- *           format: date-time
- *           description: Fecha de última actualización
- *     
- *     CreateUsuarioRequest:
- *       type: object
- *       required:
- *         - nombre
- *         - apellido
- *         - email
- *         - password
- *         - rol
- *       properties:
- *         nombre:
- *           type: string
- *           example: María
- *         apellido:
- *           type: string
- *           example: González
- *         email:
- *           type: string
- *           format: email
- *           example: maria.gonzalez@ejemplo.com
- *         password:
- *           type: string
- *           minLength: 6
- *           example: password123
- *         telefono:
- *           type: string
- *           example: "+5491198765432"
- *         dni:
- *           type: string
- *           example: "87654321"
- *         rol:
- *           type: string
- *           enum: [admin_global, admin_institucion, vendedor, comprador]
- *           example: vendedor
- *         institucion_id:
- *           type: integer
- *           example: 2
- *     
- *     UpdateUsuarioRequest:
- *       type: object
- *       properties:
- *         nombre:
- *           type: string
- *           example: María Editada
- *         apellido:
- *           type: string
- *           example: González Editada
- *         telefono:
- *           type: string
- *           example: "+5491199999999"
- *         dni:
- *           type: string
- *           example: "99999999"
- *         estado:
- *           type: string
- *           enum: [activo, inactivo, bloqueado]
- *           example: activo
- *   
- *   responses:
- *     UnauthorizedError:
- *       description: Token de acceso requerido
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               status:
- *                 type: string
- *                 example: error
- *               message:
- *                 type: string
- *                 example: Token de acceso requerido
- *     
- *     ForbiddenError:
- *       description: Permisos insuficientes
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               status:
- *                 type: string
- *                 example: error
- *               message:
- *                 type: string
- *                 example: No tienes permisos para realizar esta acción
- */
+// =====================================================
+// 🔒 TODAS LAS RUTAS REQUIEREN AUTENTICACIÓN
+// =====================================================
 
 /**
  * @swagger
  * /usuarios:
  *   get:
- *     summary: Obtener lista de usuarios
- *     description: Retorna una lista de todos los usuarios del sistema. Requiere autenticación y permisos de administrador.
+ *     summary: Listar todos los usuarios
+ *     description: Obtiene una lista paginada de usuarios del sistema. Los admin_global ven todos, los admin_institucion solo ven usuarios de su institución.
  *     tags: [Usuarios]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: query
  *         name: page
  *         schema:
  *           type: integer
  *           default: 1
- *         description: Número de página para paginación
+ *         description: Número de página
  *       - in: query
  *         name: limit
  *         schema:
  *           type: integer
- *           default: 20
- *         description: Cantidad de usuarios por página
+ *           default: 10
+ *         description: Usuarios por página
  *       - in: query
  *         name: rol
  *         schema:
  *           type: string
  *           enum: [admin_global, admin_institucion, vendedor, comprador]
- *         description: Filtrar usuarios por rol
+ *         description: Filtrar por rol
  *       - in: query
  *         name: estado
  *         schema:
  *           type: string
- *           enum: [activo, inactivo, bloqueado]
- *         description: Filtrar usuarios por estado
+ *           enum: [activo, inactivo, suspendido]
+ *         description: Filtrar por estado
  *       - in: query
- *         name: institucion_id
+ *         name: buscar
  *         schema:
- *           type: integer
- *         description: Filtrar usuarios por institución
+ *           type: string
+ *         description: Buscar por nombre, apellido o email
  *     responses:
  *       200:
- *         description: Lista de usuarios obtenida exitosamente
+ *         description: Lista de usuarios
  *         content:
  *           application/json:
  *             schema:
@@ -219,34 +70,50 @@ const router = express.Router();
  *                 status:
  *                   type: string
  *                   example: success
- *                 total:
- *                   type: integer
- *                   example: 25
  *                 data:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/Usuario'
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       nombre:
+ *                         type: string
+ *                         example: Juan
+ *                       apellido:
+ *                         type: string
+ *                         example: Pérez
+ *                       email:
+ *                         type: string
+ *                         example: juan@test.com
+ *                       rol:
+ *                         type: string
+ *                         example: vendedor
+ *                       estado:
+ *                         type: string
+ *                         example: activo
+ *                       institucion_nombre:
+ *                         type: string
+ *                         example: Cruz Roja
  *                 pagination:
  *                   type: object
  *                   properties:
- *                     current_page:
+ *                     page:
  *                       type: integer
  *                       example: 1
- *                     total_pages:
- *                       type: integer
- *                       example: 3
- *                     total_records:
- *                       type: integer
- *                       example: 25
- *                     per_page:
+ *                     limit:
  *                       type: integer
  *                       example: 10
+ *                     total:
+ *                       type: integer
+ *                       example: 45
  *       401:
- *         $ref: '#/components/responses/UnauthorizedError'
+ *         description: No autorizado
  *       403:
- *         $ref: '#/components/responses/ForbiddenError'
+ *         description: Sin permisos
  */
-router.get('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), obtenerUsuarios);
+router.get('/', requireAuth, obtenerUsuarios);
 
 /**
  * @swagger
@@ -256,18 +123,18 @@ router.get('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTIT
  *     description: Retorna la información detallada de un usuario específico
  *     tags: [Usuarios]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
  *           type: integer
- *         description: ID único del usuario
+ *         description: ID del usuario
  *         example: 1
  *     responses:
  *       200:
- *         description: Usuario encontrado exitosamente
+ *         description: Datos del usuario
  *         content:
  *           application/json:
  *             schema:
@@ -277,50 +144,105 @@ router.get('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTIT
  *                   type: string
  *                   example: success
  *                 data:
- *                   $ref: '#/components/schemas/Usuario'
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     nombre:
+ *                       type: string
+ *                       example: Juan
+ *                     apellido:
+ *                       type: string
+ *                       example: Pérez
+ *                     email:
+ *                       type: string
+ *                       example: juan@test.com
+ *                     telefono:
+ *                       type: string
+ *                       example: "+5491123456789"
+ *                     dni:
+ *                       type: string
+ *                       example: "12345678"
+ *                     rol:
+ *                       type: string
+ *                       example: vendedor
+ *                     estado:
+ *                       type: string
+ *                       example: activo
+ *                     institucion_id:
+ *                       type: integer
+ *                       example: 1
+ *                     institucion_nombre:
+ *                       type: string
+ *                       example: Cruz Roja
+ *                     fecha_creacion:
+ *                       type: string
+ *                       format: date-time
  *       404:
  *         description: Usuario no encontrado
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: error
- *                 message:
- *                   type: string
- *                   example: Usuario no encontrado
  *       401:
- *         $ref: '#/components/responses/UnauthorizedError'
- *       403:
- *         $ref: '#/components/responses/ForbiddenError'
+ *         description: No autorizado
  */
-router.get('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), obtenerUsuarioPorId);
+router.get('/:id', requireAuth, obtenerUsuarioPorId);
 
 /**
  * @swagger
  * /usuarios:
  *   post:
  *     summary: Crear nuevo usuario
- *     description: Crea un nuevo usuario en el sistema. Solo administradores pueden crear usuarios.
+ *     description: Crea un nuevo usuario en el sistema. Solo administradores.
  *     tags: [Usuarios]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/CreateUsuarioRequest'
+ *             type: object
+ *             required:
+ *               - nombre
+ *               - apellido
+ *               - email
+ *               - password
+ *               - rol
+ *             properties:
+ *               nombre:
+ *                 type: string
+ *                 example: Carlos
+ *               apellido:
+ *                 type: string
+ *                 example: Vendedor
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: carlos@test.com
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 example: test123
+ *               telefono:
+ *                 type: string
+ *                 example: "+5491123456789"
+ *               dni:
+ *                 type: string
+ *                 example: "12345678"
+ *               rol:
+ *                 type: string
+ *                 enum: [admin_global, admin_institucion, vendedor, comprador]
+ *                 example: vendedor
+ *               institucion_id:
+ *                 type: integer
+ *                 example: 1
  *           examples:
  *             vendedor:
  *               summary: Crear vendedor
  *               value:
  *                 nombre: Carlos
  *                 apellido: Vendedor
- *                 email: carlos.vendedor@ejemplo.com
- *                 password: password123
+ *                 email: carlos@test.com
+ *                 password: test123
  *                 telefono: "+5491123456789"
  *                 dni: "12345678"
  *                 rol: vendedor
@@ -329,9 +251,9 @@ router.get('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INS
  *               summary: Crear comprador
  *               value:
  *                 nombre: Ana
- *                 apellido: Compradora
- *                 email: ana.compradora@ejemplo.com
- *                 password: password123
+ *                 apellido: García
+ *                 email: ana@test.com
+ *                 password: test123
  *                 rol: comprador
  *     responses:
  *       201:
@@ -348,37 +270,25 @@ router.get('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INS
  *                   type: string
  *                   example: Usuario creado exitosamente
  *                 data:
- *                   $ref: '#/components/schemas/Usuario'
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 15
+ *                     nombre:
+ *                       type: string
+ *                       example: Carlos
+ *                     email:
+ *                       type: string
+ *                       example: carlos@test.com
  *       400:
- *         description: Datos de entrada inválidos
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: error
- *                 message:
- *                   type: string
- *                   example: Nombre, apellido, email, password y rol son obligatorios
+ *         description: Datos inválidos
  *       409:
  *         description: Email ya existe
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: error
- *                 message:
- *                   type: string
- *                   example: Ya existe un usuario con ese email
  *       401:
- *         $ref: '#/components/responses/UnauthorizedError'
+ *         description: No autorizado
  *       403:
- *         $ref: '#/components/responses/ForbiddenError'
+ *         description: Sin permisos
  */
 router.post('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), crearUsuario);
 
@@ -387,34 +297,64 @@ router.post('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTI
  * /usuarios/{id}:
  *   put:
  *     summary: Actualizar usuario
- *     description: Actualiza la información de un usuario existente
+ *     description: Modifica los datos de un usuario existente. Solo administradores.
  *     tags: [Usuarios]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
  *           type: integer
- *         description: ID único del usuario a actualizar
+ *         description: ID del usuario a actualizar
  *         example: 1
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/UpdateUsuarioRequest'
+ *             type: object
+ *             properties:
+ *               nombre:
+ *                 type: string
+ *                 example: Juan Carlos
+ *               apellido:
+ *                 type: string
+ *                 example: Pérez García
+ *               email:
+ *                 type: string
+ *                 example: juan.nuevo@test.com
+ *               telefono:
+ *                 type: string
+ *                 example: "+5491199999999"
+ *               dni:
+ *                 type: string
+ *                 example: "87654321"
+ *               rol:
+ *                 type: string
+ *                 enum: [admin_global, admin_institucion, vendedor, comprador]
+ *                 example: vendedor
+ *               estado:
+ *                 type: string
+ *                 enum: [activo, inactivo, suspendido]
+ *                 example: activo
  *           examples:
- *             actualizar_basico:
- *               summary: Actualización básica
+ *             actualizar_telefono:
+ *               summary: Actualizar teléfono
  *               value:
- *                 nombre: Juan Carlos
  *                 telefono: "+5491199999999"
  *             cambiar_estado:
- *               summary: Cambiar estado de usuario
+ *               summary: Suspender usuario
  *               value:
- *                 estado: inactivo
+ *                 estado: suspendido
+ *             actualizar_completo:
+ *               summary: Actualización completa
+ *               value:
+ *                 nombre: Juan Carlos
+ *                 apellido: Pérez García
+ *                 telefono: "+5491199999999"
+ *                 estado: activo
  *     responses:
  *       200:
  *         description: Usuario actualizado exitosamente
@@ -430,13 +370,15 @@ router.post('/', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTI
  *                   type: string
  *                   example: Usuario actualizado exitosamente
  *                 data:
- *                   $ref: '#/components/schemas/Usuario'
+ *                   type: object
+ *       400:
+ *         description: No se proporcionaron campos para actualizar
  *       404:
  *         description: Usuario no encontrado
  *       401:
- *         $ref: '#/components/responses/UnauthorizedError'
+ *         description: No autorizado
  *       403:
- *         $ref: '#/components/responses/ForbiddenError'
+ *         description: Sin permisos
  */
 router.put('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INSTITUCION]), actualizarUsuario);
 
@@ -445,17 +387,17 @@ router.put('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INS
  * /usuarios/{id}:
  *   delete:
  *     summary: Eliminar usuario
- *     description: Elimina un usuario del sistema (soft delete)
+ *     description: Elimina permanentemente un usuario del sistema. Solo admin_global.
  *     tags: [Usuarios]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
  *           type: integer
- *         description: ID único del usuario a eliminar
+ *         description: ID del usuario a eliminar
  *         example: 1
  *     responses:
  *       200:
@@ -474,9 +416,9 @@ router.put('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL, ROLES.ADMIN_INS
  *       404:
  *         description: Usuario no encontrado
  *       401:
- *         $ref: '#/components/responses/UnauthorizedError'
+ *         description: No autorizado
  *       403:
- *         $ref: '#/components/responses/ForbiddenError'
+ *         description: Sin permisos suficientes
  */
 router.delete('/:id', requireAuth, requireRole([ROLES.ADMIN_GLOBAL]), eliminarUsuario);
 

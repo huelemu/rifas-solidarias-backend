@@ -21,6 +21,9 @@ import { requireAuth, optionalAuth } from './src/middleware/auth.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
+import asignacionRoutes from './src/routes/asignaciones.js';
+import impresionRoutes from './src/routes/impresion.js';
+import compraPublicaRoutes from './src/routes/compraPublica.js';
 
 
 // Configurar variables de entorno PRIMERO
@@ -345,6 +348,7 @@ app.get('/test-db', async (req, res) => {
   }
 });
 
+
 // Test específico para JWT
 app.get('/test-jwt', (req, res) => {
   const jwtConfig = {
@@ -475,12 +479,23 @@ console.log('✅ Rutas de usuarios configuradas');
 // ✅ NUEVAS RUTAS DE RIFAS
 app.use('/rifas', rifasRoutes);
 console.log('✅ Rutas de rifas configuradas');
-
 console.log('🎯 Todas las rutas configuradas correctamente');
+
+// Imprimir
+app.use('/impresion', impresionRoutes);
+console.log('✅ Rutas de impresión configuradas');
+
+// ✅ AGREGAR DESPUÉS DE app.use('/rifas', rifasRoutes);
+app.use('/asignaciones', asignacionRoutes);
+console.log('✅ Rutas de asignaciones configuradas');
 
 // Rutas de notificaciones
 app.use('/notifications', notificationRoutes);
 console.log('✅ Rutas de notificaciones configuradas');
+
+// ✅ REGISTRAR RUTA (SIN AUTENTICACIÓN - ES PÚBLICA)
+app.use('/comprar', compraPublicaRoutes);
+console.log('✅ Rutas de compra pública configuradas');
 
 // =====================================================
 // DOCUMENTACIÓN SWAGGER
