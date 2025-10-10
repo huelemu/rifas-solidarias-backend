@@ -385,7 +385,7 @@ async obtenerRifaPublica(req, res) {
         (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as numeros_vendidos,
         (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'disponible') as numeros_disponibles,
         (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'reservado') as numeros_reservados,
-        (SELECT SUM(precio_numero) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as total_recaudado
+        (SELECT SUM(precio_venta) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as total_recaudado
       FROM rifas r
       LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
       LEFT JOIN usuarios u ON r.creado_por = u.id

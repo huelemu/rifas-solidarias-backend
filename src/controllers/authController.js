@@ -867,6 +867,19 @@ export const handleGoogleCallback = async (req, res) => {
     console.log('✅ Código de autorización recibido');
     console.log('📝 State recibido:', state); // login o register
 
+    // ✅ NUEVO: Parsear state para obtener returnUrl
+    let stateData = { type: 'login', returnUrl: null };
+    try {
+      if (state) {
+        stateData = JSON.parse(state);
+        console.log('📍 returnUrl desde state:', stateData.returnUrl);
+      }
+    } catch (parseError) {
+      console.warn('⚠️ Error parseando state:', parseError);
+    }
+
+    
+
     // =====================================================
     // INTERCAMBIAR CÓDIGO POR TOKENS DE GOOGLE
     // =====================================================
@@ -1060,11 +1073,13 @@ export const handleGoogleCallback = async (req, res) => {
 
 // =====================================================
 // FUNCIÓN AUXILIAR PARA GENERAR TOKENS Y REDIRIGIR
+// ✅ ACTUALIZADA PARA INCLUIR returnUrl
 // =====================================================
 
-async function generarTokensYRedirigir(usuario, res) {
+async function generarTokensYRedirigir(usuario, res, returnUrl = null) {
   try {
     console.log('🔑 Generando tokens JWT...');
+    console.log('📍 returnUrl a incluir:', returnUrl);
     
     // Generar tokens JWT
     const tokenPayload = {
@@ -1085,18 +1100,24 @@ async function generarTokensYRedirigir(usuario, res) {
       [usuario.id]
     );
 
-    console.log('🔄 Redirigiendo al frontend con tokens...');
-
-    // Redirigir al frontend con tokens en la URL
-    const frontendUrl = new URL(`${process.env.FRONTEND_URL || 'http://localhost:4200'}/auth/google/callback`);
-    frontendUrl.searchParams.append('access_token', accessToken);
-    frontendUrl.searchParams.append('refresh_token', refreshToken);
+    // ✅ NUEVO: Construir URL de redirección con returnUrl
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+    let redirectUrl = `${frontendUrl}/auth/google/callback?access_token=${accessToken}&refresh_token=${refreshToken}`;
     
-    res.redirect(frontendUrl.toString());
+    if (returnUrl) {
+      redirectUrl += `&returnUrl=${encodeURIComponent(returnUrl)}`;
+      console.log('✅ returnUrl incluido en la redirección');
+    }
+
+    console.log('🔄 Redirigiendo al frontend con tokens y returnUrl...');
+    console.log('📍 URL de redirección:', redirectUrl);
+
+    res.redirect(redirectUrl);
 
   } catch (error) {
     console.error('💥 ERROR GENERANDO TOKENS:', error);
-    throw error;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+    res.redirect(`${frontendUrl}/login?error=token_generation_error`);
   }
 }
 

@@ -8,6 +8,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { setupSwagger } from './src/config/swagger.js';
 import db from './src/config/db.js';
+import statsRoutes from './src/routes/statsRoutes.js';
 
 // Importar rutas
 import authRoutes from './src/routes/auth.js';
@@ -417,6 +418,11 @@ app.get('/stats/public', optionalAuth, async (req, res) => {
     });
   }
 });
+
+// Rutas de estadísticas
+app.use('/stats', statsRoutes);
+console.log('✅ Rutas de estadísticas configuradas');
+
 
 // ✅ NUEVO: Test específico para rifas
 app.get('/test-rifas', requireAuth, async (req, res) => {
