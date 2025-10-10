@@ -465,6 +465,89 @@ app.get('/test-rifas', requireAuth, async (req, res) => {
   }
 });
 
+
+// Ventas por mes para el gráfico
+app.get('/estadisticas/ventas-por-mes', async (req, res) => {
+  try {
+    const [ventas] = await db.execute(`
+      SELECT 
+        DATE_FORMAT(nr.fecha_venta, '%Y-%m') as mes,
+        COUNT(DISTINCT nr.id) as ventas,
+        COALESCE(SUM(COALESCE(nr.precio_venta, r.precio_numero)), 0) as recaudacion
+      FROM numeros_rifa nr
+      JOIN rifas r ON nr.rifa_id = r.id
+      WHERE 
+        nr.estado = 'vendido' 
+        AND nr.fecha_venta >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+      GROUP BY mes
+      ORDER BY mes ASC
+    `);
+
+    const mesesES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+    const ventasFormateadas = ventas.map(v => {
+      const [year, month] = v.mes.split('-');
+      return {
+        mes: mesesES[parseInt(month) - 1],
+        ventas: parseInt(v.ventas),
+        recaudacion: parseFloat(v.recaudacion)
+      };
+    });
+
+    res.json({
+      status: 'success',
+      data: ventasFormateadas
+    });
+  } catch (error) {
+    console.error('❌ Error ventas-por-mes:', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// Dashboard del usuario autenticado
+app.get('/estadisticas/dashboard', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [stats] = await db.execute(`
+      SELECT 
+        (SELECT COUNT(*) FROM rifas WHERE estado = 'activa') as rifas_activas,
+        (SELECT COUNT(*) FROM rifas WHERE estado = 'finalizada') as rifas_finalizadas,
+        (SELECT COALESCE(SUM(nr.precio_venta), 0) 
+         FROM numeros_rifa nr WHERE nr.estado = 'vendido') as total_recaudado,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE estado = 'vendido') as numeros_vendidos
+    `);
+
+    const [misNumeros] = await db.execute(`
+      SELECT COUNT(*) as total
+      FROM numeros_rifa
+      WHERE participante_id = ? AND estado = 'vendido'
+    `, [userId]);
+
+    const [proximosSorteos] = await db.execute(`
+      SELECT COUNT(*) as total
+      FROM rifas
+      WHERE estado = 'activa' AND fecha_sorteo > NOW()
+    `);
+
+    res.json({
+      status: 'success',
+      data: {
+        rifas_activas: parseInt(stats[0].rifas_activas),
+        rifas_finalizadas: parseInt(stats[0].rifas_finalizadas),
+        total_recaudado: parseFloat(stats[0].total_recaudado),
+        numeros_vendidos: parseInt(stats[0].numeros_vendidos),
+        mis_numeros: parseInt(misNumeros[0].total),
+        proximos_sorteos: parseInt(proximosSorteos[0].total)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error dashboard:', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
 // =====================================================
 // RUTAS PRINCIPALES
 // =====================================================
