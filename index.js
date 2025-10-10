@@ -35,6 +35,7 @@ const app = express();
 console.log('🔧 Iniciando servidor...');
 console.log('📦 Express app creada correctamente');
 
+
 // =====================================================
 // CONFIGURACIÓN CORS PARA DESARROLLO Y PRODUCCIÓN
 // =====================================================

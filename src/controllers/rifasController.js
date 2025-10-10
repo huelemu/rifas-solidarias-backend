@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Rifa } from '../models/Rifa.js';
+import QRCode from 'qrcode';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -365,32 +366,266 @@ async actualizarRifa(req, res) {
       res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
     }
   },
+
+  /**
+ * Obtener rifa pública (sin autenticación)
+ */
+async obtenerRifaPublica(req, res) {
+  try {
+    const { id } = req.params;
+
+    const [rifas] = await db.execute(`
+      SELECT 
+        r.*,
+        i.nombre as institucion_nombre,
+        i.logo_url as institucion_logo,
+        u.nombre as creador_nombre,
+        u.apellido as creador_apellido,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id) as total_numeros_generados,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as numeros_vendidos,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'disponible') as numeros_disponibles,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'reservado') as numeros_reservados,
+        (SELECT SUM(precio_numero) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as total_recaudado
+      FROM rifas r
+      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+      LEFT JOIN usuarios u ON r.creado_por = u.id
+      WHERE r.id = ? AND r.estado != 'borrador'
+    `, [id]);
+
+    if (rifas.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada o no está disponible públicamente'
+      });
+    }
+
+    const rifa = rifas[0];
+
+    // Calcular porcentaje vendido
+    if (rifa.total_numeros_generados > 0) {
+      rifa.porcentaje_vendido = Math.round(
+        (rifa.numeros_vendidos / rifa.total_numeros_generados) * 100
+      );
+    } else {
+      rifa.porcentaje_vendido = 0;
+    }
+
+    res.json({
+      status: 'success',
+      data: rifa
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo rifa pública:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener la rifa'
+    });
+  }
+},
+
+/**
+ * Obtener números públicos (sin autenticación)
+ */
+async obtenerNumerosPublicos(req, res) {
+  try {
+    const { id } = req.params;
+    const { 
+      estado, 
+      page = 1, 
+      limit = 100,
+      desde,
+      hasta 
+    } = req.query;
+
+    // Verificar que la rifa existe y está activa
+    const [rifas] = await db.execute(
+      'SELECT id, estado FROM rifas WHERE id = ? AND estado != ?',
+      [id, 'borrador']
+    );
+
+    if (rifas.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada o no disponible públicamente'
+      });
+    }
+
+    // Construir query
+    let query = `
+      SELECT 
+        id,
+        rifa_id,
+        numero,
+        qr_code,
+        estado,
+        precio_venta,
+        fecha_venta
+      FROM numeros_rifa
+      WHERE rifa_id = ?
+    `;
+
+    const params = [id];
+
+    // Filtros opcionales
+    if (estado) {
+      query += ' AND estado = ?';
+      params.push(estado);
+    }
+
+    if (desde) {
+      query += ' AND numero >= ?';
+      params.push(parseInt(desde));
+    }
+
+    if (hasta) {
+      query += ' AND numero <= ?';
+      params.push(parseInt(hasta));
+    }
+
+    query += ' ORDER BY numero ASC';
+
+    // Paginación
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    query += ' LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+
+    const [numeros] = await db.execute(query, params);
+
+    // Contar total
+    let countQuery = 'SELECT COUNT(*) as total FROM numeros_rifa WHERE rifa_id = ?';
+    const countParams = [id];
+
+    if (estado) {
+      countQuery += ' AND estado = ?';
+      countParams.push(estado);
+    }
+
+    const [countResult] = await db.execute(countQuery, countParams);
+    const total = countResult[0].total;
+
+    res.json({
+      status: 'success',
+      data: numeros,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: total,
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo números públicos:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener los números'
+    });
+  }
+},
+
   // =====================================================
   // FUNCIONES DE NÚMEROS (Implementadas)
   // =====================================================
 
   async generarNumerosRifa(req, res) {
-    try {
-      const { id } = req.params;
-      const [r] = await db.execute('SELECT * FROM rifas WHERE id = ?', [id]);
-      if (!r.length) return res.status(404).json({ status: 'error', message: 'Rifa no encontrada' });
-      const rifa = r[0];
+  try {
+    const { id } = req.params;
+    
+    console.log(`🎯 Generando números para rifa ${id}`);
 
-      const nums = [];
-      for (let i = 1; i <= rifa.cantidad_numeros; i++) {
-        const qr = `RIFA${id}-${String(i).padStart(6, '0')}-${Date.now()}`;
-        nums.push([id, i, 'disponible', qr]);
-      }
+    // Verificar que la rifa existe
+    const [rifas] = await db.execute(
+      'SELECT * FROM rifas WHERE id = ?',
+      [id]
+    );
 
-      const placeholders = nums.map(() => '(?, ?, ?, ?)').join(',');
-      await db.execute(`INSERT INTO numeros_rifa (rifa_id, numero, estado, qr_code) VALUES ${placeholders}`, nums.flat());
-
-      res.json({ status: 'success', message: 'Números generados exitosamente', total: nums.length });
-    } catch (error) {
-      console.error('Error al generar números:', error);
-      res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+    if (rifas.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada'
+      });
     }
-  },
+
+    const rifa = rifas[0];
+
+    // Verificar que no se hayan generado ya
+    const [numerosExistentes] = await db.execute(
+      'SELECT COUNT(*) as total FROM numeros_rifa WHERE rifa_id = ?',
+      [id]
+    );
+
+    if (numerosExistentes[0].total > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Los números ya han sido generados para esta rifa'
+      });
+    }
+
+    
+    // ✅ CONFIGURAR URL BASE (desde variable de entorno o por defecto)
+    const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:4200';
+    
+    console.log(`📍 URL base configurada: ${FRONTEND_URL}`);
+
+    // Preparar números para insertar
+    const numerosParaInsertar = [];
+    
+    for (let i = 1; i <= rifa.cantidad_numeros; i++) {
+      // ✅ GENERAR URL PÚBLICA PARA CADA NÚMERO
+      const urlPublica = `${FRONTEND_URL}/public/rifas/${id}/numero/${i}`;
+      
+      // ✅ GENERAR QR CODE CON LA URL PÚBLICA
+      const qrCodeDataURL = await QRCode.toDataURL(urlPublica, {
+        errorCorrectionLevel: 'H',
+        margin: 1,
+        width: 300,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      });
+
+      numerosParaInsertar.push([
+        id,                           // rifa_id
+        i,                            // numero
+        qrCodeDataURL,                // qr_code (Data URL con la imagen)
+        'disponible',                 // estado
+        rifa.precio_numero            // precio
+      ]);
+    }
+
+    // Insertar todos los números en una sola operación
+    const query = `
+      INSERT INTO numeros_rifa 
+        (rifa_id, numero, qr_code, estado, precio_venta) 
+      VALUES ?
+    `;
+
+    await db.query(query, [numerosParaInsertar]);
+
+    console.log(`✅ ${rifa.cantidad_numeros} números generados con QR codes funcionales`);
+
+    res.json({
+      status: 'success',
+      message: 'Números generados exitosamente',
+      data: {
+        rifa_id: id,
+        total_numeros: rifa.cantidad_numeros,
+        estado: 'activa',
+        url_ejemplo: `${FRONTEND_URL}/public/rifas/${id}/numero/1`
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error generando números:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al generar números',
+      error: error.message
+    });
+  }
+},
 
   async obtenerNumerosRifa(req, res) {
     try {

@@ -9,7 +9,7 @@ export const generarBoletoIndividual = async (req, res) => {
     const { rifaId, numero } = req.params;
 
     console.log(`📄 Generando boleto para Rifa ${rifaId}, Número ${numero}`);
-
+ 
     // ✅ CAMBIAR A LEFT JOIN
     const [numeros] = await db.execute(
       `SELECT nr.*, 

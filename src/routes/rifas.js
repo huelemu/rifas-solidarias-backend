@@ -697,6 +697,29 @@ router.get('/usuario/mis-rifas', requireAuth, rifasController.obtenerMisRifas);
 router.get('/:id/mis-numeros', requireAuth, rifasController.obtenerMisNumeros);
 
 // =====================================================
+// 🌐 RUTAS PÚBLICAS (NO REQUIEREN AUTENTICACIÓN)
+// =====================================================
+
+/**
+ * @swagger
+ * /rifas/publicas/{id}:
+ *   get:
+ *     summary: Obtener rifa pública (sin autenticación)
+ *     tags: [Rifas Públicas]
+ */
+router.get('/publicas/:id', rifasController.obtenerRifaPublica);
+
+/**
+ * @swagger
+ * /rifas/publicas/{id}/numeros:
+ *   get:
+ *     summary: Obtener números de rifa pública
+ *     tags: [Rifas Públicas]
+ */
+router.get('/publicas/:id/numeros', rifasController.obtenerNumerosPublicos);
+
+
+// =====================================================
 // 🏢 ADMINISTRACIÓN MULTI-INSTITUCIÓN
 // =====================================================
 
