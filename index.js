@@ -9,6 +9,7 @@ import dotenv from 'dotenv';
 import { setupSwagger } from './src/config/swagger.js';
 import db from './src/config/db.js';
 import statsRoutes from './src/routes/statsRoutes.js';
+import dashboardRoutes from './src/routes/dashboard.js';
 
 // Importar rutas
 import authRoutes from './src/routes/auth.js';
@@ -105,6 +106,8 @@ app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${origin}`);
   next();
 });
+
+app.use('/dashboard', dashboardRoutes);
 
 // =====================================================
 // ENDPOINTS DE TESTING Y MONITOREO

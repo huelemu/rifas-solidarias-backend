@@ -136,6 +136,8 @@ export const authenticateToken = async (req, res, next) => {
  */
 export const requireAuth = authenticateToken;
 
+
+
 // =====================================================
 // MIDDLEWARE DE ROLES
 // =====================================================
@@ -267,6 +269,31 @@ export const optionalAuth = async (req, res, next) => {
     next();
   }
 };
+
+/**
+ * Middleware para autenticación OPCIONAL
+ * Si hay token válido, agrega req.user
+ * Si no hay token o es inválido, continúa sin error
+ */
+// export const optionalAuth = (req, res, next) => {
+//   try {
+//     const authHeader = req.headers.authorization;
+    
+//     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+//       // No hay token, continuar sin usuario
+//       return next();
+//     }
+
+//     const token = authHeader.substring(7);
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tu-secreto-super-seguro-cambialo');
+    
+//     req.user = decoded;
+//     next();
+//   } catch (error) {
+//     // Token inválido o expirado, continuar sin usuario
+//     next();
+//   }
+// };
 
 // =====================================================
 // MIDDLEWARES ESPECÍFICOS POR ROL
