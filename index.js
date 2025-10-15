@@ -2,7 +2,7 @@
 // INDEX.JS COMPLETO CON MÓDULO DE RIFAS
 // Servidor principal para Rifas Solidarias
 // =====================================================
-
+import reservasRoutes from './src/routes/reservas.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -10,6 +10,7 @@ import { setupSwagger } from './src/config/swagger.js';
 import db from './src/config/db.js';
 import statsRoutes from './src/routes/statsRoutes.js';
 import dashboardRoutes from './src/routes/dashboard.js';
+import numerosRoutes from './src/routes/numerosRoutes.js';
 
 // Importar rutas
 import authRoutes from './src/routes/auth.js';
@@ -107,7 +108,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/dashboard', dashboardRoutes);
+
 
 // =====================================================
 // ENDPOINTS DE TESTING Y MONITOREO
@@ -422,6 +423,9 @@ app.get('/stats/public', optionalAuth, async (req, res) => {
   }
 });
 
+app.use('/numeros', numerosRoutes);
+console.log('✅ Rutas de números configuradas: /numeros');
+
 // Rutas de estadísticas
 app.use('/stats', statsRoutes);
 console.log('✅ Rutas de estadísticas configuradas');
@@ -550,6 +554,12 @@ app.get('/estadisticas/dashboard', requireAuth, async (req, res) => {
     res.status(500).json({ status: 'error', message: error.message });
   }
 });
+
+// Rutas de reservas
+app.use('/reservas', reservasRoutes);
+console.log('✅ Rutas de reservas configuradas');
+
+app.use('/dashboard', dashboardRoutes);
 
 // =====================================================
 // RUTAS PRINCIPALES

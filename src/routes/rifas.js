@@ -10,6 +10,21 @@ import rifasController, { rifasValidations } from '../controllers/rifasControlle
 
 const router = Router();
 
+
+// =====================================================
+// AGREGAR ESTA RUTA PÚBLICA EN rifas.js
+// =====================================================
+
+/**
+ * @route   GET /rifas/:id/numeros
+ * @desc    Ver todos los números de una rifa (PÚBLICO)
+ * @access  Public
+ */
+router.get(
+  '/:id/numeros',
+  rifasController.obtenerNumerosRifaPublico
+);  
+
 // =====================================================
 // 🎪 CRUD DE RIFAS
 // =====================================================
@@ -448,7 +463,7 @@ router.post(
  *                       metodo_pago:
  *                         type: string
  */
-router.get('/:id/numeros', requireAuth, rifasController.obtenerNumerosRifa);
+// se hizo publico -> router.get('/:id/numeros', requireAuth, rifasController.obtenerNumerosRifa);
 
 /**
  * @swagger

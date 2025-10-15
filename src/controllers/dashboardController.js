@@ -113,6 +113,20 @@ const dashboardController = {
         WHERE r.estado IN ('activa', 'finalizada')
       `);
 
+      const dashboardController = {
+  async getPublicDashboard(req, res) {
+    try {
+      // ... código del controlador
+    } catch (error) {
+      console.error('❌ Error en dashboard público:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al obtener datos del dashboard',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+};
       // =====================================================
       // DATOS ADICIONALES SI ESTÁ AUTENTICADO
       // =====================================================

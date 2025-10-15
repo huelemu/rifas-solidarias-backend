@@ -10,7 +10,7 @@ import dashboardController from '../controllers/dashboardController.js';
 const router = Router();
 
 /**
- * @route   GET /api/dashboard/public
+ * @route   GET /dashboard/public
  * @desc    Obtener datos del dashboard público
  * @access  Public (con info adicional si está autenticado)
  */
