@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import rifasController, { rifasValidations } from '../controllers/rifasController.js';
+import { uploadLogoRifa } from '../config/upload.js';
 
 const router = Router();
 
@@ -14,6 +15,19 @@ const router = Router();
 // RUTA PÚBLICA DE NÚMEROS (ya está)
 // =====================================================
 router.get('/:id/numeros', rifasController.obtenerNumerosRifaPublico);
+
+// =====================================================
+// RUTAS PÚBLICAS (SIN AUTENTICACIÓN) - AGREGAR AL INICIO
+// =====================================================
+
+/**
+ * @swagger
+ * /public/rifas/{rifaId}/numero/{numero}:
+ *   get:
+ *     summary: Obtener información pública de un número específico
+ *     tags: [Público]
+ */
+router.get('/public/rifas/:rifaId/numero/:numero', rifasController.obtenerNumeroPublico);
 
 // ===================================================
 // RUTAS DE VENDEDOR ⭐ AQUÍ ANTES DE /:id
@@ -35,6 +49,45 @@ router.get('/vendedor/mis-rifas',
   requireAuth,
   requireRole(['vendedor', 'admin_institucion', 'admin_global']),
   rifasController.obtenerMisRifasVendedor
+);
+
+// =====================================================
+// 🖼️ RUTAS DE GESTIÓN DE LOGO DE RIFAS (AGREGAR ESTAS)
+// =====================================================
+
+/**
+ * @swagger
+ * /rifas/{id}/logo:
+ *   post:
+ *     summary: Subir logo de rifa
+ *     description: Sube o reemplaza el logo de una rifa
+ *     tags: [Rifas]
+ *     security:
+ *       - BearerAuth: []
+ */
+router.post(
+  '/:id/logo',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  uploadLogoRifa.single('logo'), // ✅ Middleware de multer
+  rifasController.subirLogoRifa
+);
+
+/**
+ * @swagger
+ * /rifas/{id}/logo:
+ *   delete:
+ *     summary: Eliminar logo de rifa
+ *     description: Elimina el logo actual de una rifa
+ *     tags: [Rifas]
+ *     security:
+ *       - BearerAuth: []
+ */
+router.delete(
+  '/:id/logo',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  rifasController.eliminarLogoRifa
 );
 
 
@@ -486,6 +539,8 @@ router.delete(
   requireRole(['admin_global', 'admin_institucion']),
   rifasController.cancelarVentaNumero
 );
+
+
 
 // =====================================================
 // 👤 MIS RIFAS Y NÚMEROS

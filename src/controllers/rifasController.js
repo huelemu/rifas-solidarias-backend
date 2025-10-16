@@ -1158,6 +1158,215 @@ async venderNumeroVendedor(req, res) {
   }
 },
 
+/**
+ * GET /public/rifas/:rifaId/numero/:numero
+ * Obtener información pública de un número específico
+ */
+async obtenerNumeroPublico(req, res) {
+  try {
+    const { rifaId, numero } = req.params;
+
+    console.log(`🔍 Consultando número público: Rifa ${rifaId}, Número ${numero}`);
+
+    // Obtener info del número con datos de la rifa
+    const [numeros] = await db.execute(`
+      SELECT 
+        n.id,
+        n.numero,
+        n.qr_code,
+        n.estado,
+        n.precio_venta,
+        n.fecha_venta,
+        n.comprador_nombre,
+        n.comprador_apellido,
+        r.id as rifa_id,
+        r.nombre as rifa_nombre,
+        r.descripcion as rifa_descripcion,
+        r.imagen_url as rifa_imagen,
+        r.precio_numero as rifa_precio,
+        r.fecha_sorteo,
+        r.estado as rifa_estado,
+        i.nombre as institucion_nombre,
+        i.logo_url as institucion_logo
+      FROM numeros_rifa n
+      INNER JOIN rifas r ON n.rifa_id = r.id
+      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+      WHERE n.rifa_id = ? AND n.numero = ?
+    `, [rifaId, numero]);
+
+    if (numeros.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Número no encontrado'
+      });
+    }
+
+    const numeroData = numeros[0];
+
+    // ✅ Si el número está vendido, ocultar datos sensibles del comprador
+    if (numeroData.estado === 'vendido') {
+      numeroData.comprador_nombre = numeroData.comprador_nombre 
+        ? numeroData.comprador_nombre.charAt(0) + '***' 
+        : null;
+      numeroData.comprador_apellido = null;
+    }
+
+    res.json({
+      status: 'success',
+      data: numeroData
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo número público:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener el número'
+    });
+  }
+},
+
+
+ // =====================================================
+  // 🖼️ GESTIÓN DE LOGOS DE RIFAS - AGREGAR AQUÍ
+  // =====================================================
+
+  /**
+   * POST /rifas/:id/logo - Subir logo de rifa
+   */
+  async subirLogoRifa(req, res) {
+    try {
+      const { id } = req.params;
+
+      console.log('📤 Intentando subir logo para rifa ID:', id);
+
+      // Verificar que existe la rifa
+      const [rifas] = await db.execute(
+        'SELECT id, imagen_url FROM rifas WHERE id = ?',
+        [id]
+      );
+
+      if (rifas.length === 0) {
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(404).json({
+          status: 'error',
+          message: 'Rifa no encontrada'
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'No se proporcionó ningún archivo'
+        });
+      }
+
+      // Eliminar logo anterior si existe
+      const oldLogoUrl = rifas[0].imagen_url;
+      if (oldLogoUrl) {
+        const oldLogoPath = path.join(__dirname, '../../', oldLogoUrl);
+        if (fs.existsSync(oldLogoPath)) {
+          fs.unlinkSync(oldLogoPath);
+          console.log('🗑️ Logo anterior eliminado:', oldLogoPath);
+        }
+      }
+
+      // Construir URL del nuevo logo
+      const logoUrl = `/uploads/rifas/${req.file.filename}`;
+      console.log('✅ Nuevo logo guardado en:', logoUrl);
+
+      // Actualizar en la base de datos
+      await db.execute(
+        'UPDATE rifas SET imagen_url = ?, fecha_actualizacion = NOW() WHERE id = ?',
+        [logoUrl, id]
+      );
+
+      // Obtener rifa actualizada
+      const [rifaActualizada] = await db.execute(
+        'SELECT * FROM rifas WHERE id = ?',
+        [id]
+      );
+
+      res.json({
+        status: 'success',
+        message: 'Logo de rifa subido exitosamente',
+        data: {
+          rifa: rifaActualizada[0],
+          logo_url: logoUrl
+        }
+      });
+
+    } catch (error) {
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      
+      console.error('❌ Error al subir logo de rifa:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al subir logo de rifa',
+        error: error.message
+      });
+    }
+  },
+
+  /**
+   * DELETE /rifas/:id/logo - Eliminar logo de rifa
+   */
+  async eliminarLogoRifa(req, res) {
+    try {
+      const { id } = req.params;
+
+      const [rifas] = await db.execute(
+        'SELECT imagen_url FROM rifas WHERE id = ?',
+        [id]
+      );
+
+      if (rifas.length === 0) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Rifa no encontrada'
+        });
+      }
+
+      const logoUrl = rifas[0].imagen_url;
+
+      if (!logoUrl) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'La rifa no tiene logo'
+        });
+      }
+
+      // Eliminar archivo físico
+      const logoPath = path.join(__dirname, '../../', logoUrl);
+      if (fs.existsSync(logoPath)) {
+        fs.unlinkSync(logoPath);
+        console.log('🗑️ Logo eliminado:', logoPath);
+      }
+
+      // Actualizar base de datos
+      await db.execute(
+        'UPDATE rifas SET imagen_url = NULL, fecha_actualizacion = NOW() WHERE id = ?',
+        [id]
+      );
+
+      res.json({
+        status: 'success',
+        message: 'Logo de rifa eliminado exitosamente'
+      });
+
+    } catch (error) {
+      console.error('❌ Error al eliminar logo de rifa:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al eliminar logo de rifa',
+        error: error.message
+      });
+    }
+  }
+
 };
 
 // =====================================================
@@ -1184,3 +1393,4 @@ export const rifasValidations = {
 };
 
 export default rifasController;
+
