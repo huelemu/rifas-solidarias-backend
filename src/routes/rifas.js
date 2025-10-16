@@ -10,171 +10,42 @@ import rifasController, { rifasValidations } from '../controllers/rifasControlle
 
 const router = Router();
 
+// =====================================================
+// RUTA PÚBLICA DE NÚMEROS (ya está)
+// =====================================================
+router.get('/:id/numeros', rifasController.obtenerNumerosRifaPublico);
+
+// ===================================================
+// RUTAS DE VENDEDOR ⭐ AQUÍ ANTES DE /:id
+// ===================================================
+router.get('/:rifa_id/vendedor/mis-numeros', 
+  requireAuth,
+  requireRole(['vendedor', 'admin_institucion', 'admin_global']),
+  rifasController.obtenerNumerosVendedor
+);
+
+router.post('/:rifa_id/numeros/:numero/vender-vendedor',
+  requireAuth,
+  requireRole(['vendedor', 'admin_institucion', 'admin_global']),
+  rifasController.venderNumeroVendedor
+);
+
+// ⭐ AGREGAR ESTA RUTA
+router.get('/vendedor/mis-rifas',
+  requireAuth,
+  requireRole(['vendedor', 'admin_institucion', 'admin_global']),
+  rifasController.obtenerMisRifasVendedor
+);
+
 
 // =====================================================
-// AGREGAR ESTA RUTA PÚBLICA EN rifas.js
+// 🎪 CRUD DE RIFAS (continúa normal)
 // =====================================================
-
-/**
- * @route   GET /rifas/:id/numeros
- * @desc    Ver todos los números de una rifa (PÚBLICO)
- * @access  Public
- */
-router.get(
-  '/:id/numeros',
-  rifasController.obtenerNumerosRifaPublico
-);  
-
-// =====================================================
-// 🎪 CRUD DE RIFAS
-// =====================================================
-
-/**
- * @swagger
- * /rifas:
- *   get:
- *     summary: Listar todas las rifas
- *     description: Obtiene una lista de rifas con filtros opcionales
- *     tags: [Rifas]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: estado
- *         schema:
- *           type: string
- *           enum: [borrador, activa, cerrada, finalizada, cancelada]
- *         description: Filtrar por estado
- *       - in: query
- *         name: institucion_id
- *         schema:
- *           type: integer
- *         description: Filtrar por institución
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
- *     responses:
- *       200:
- *         description: Lista de rifas
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:
- *                         type: integer
- *                         example: 1
- *                       nombre:
- *                         type: string
- *                         example: Rifa Solidaria 2025
- *                       descripcion:
- *                         type: string
- *                       cantidad_numeros:
- *                         type: integer
- *                         example: 1000
- *                       precio_numero:
- *                         type: number
- *                         example: 500.00
- *                       fecha_sorteo:
- *                         type: string
- *                         format: date-time
- *                       estado:
- *                         type: string
- *                         example: activa
- *                       institucion_nombre:
- *                         type: string
- *                         example: Cruz Roja
- *                       numeros_vendidos:
- *                         type: integer
- *                         example: 450
- *                       total_recaudado:
- *                         type: number
- *                         example: 225000.00
- */
 router.get('/', rifasController.listarRifas);
-
-/**
- * @swagger
- * /rifas/{id}:
- *   get:
- *     summary: Obtener detalles de una rifa
- *     description: Retorna información completa de una rifa específica
- *     tags: [Rifas]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: ID de la rifa
- *         example: 1
- *     responses:
- *       200:
- *         description: Detalles de la rifa
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                     nombre:
- *                       type: string
- *                     descripcion:
- *                       type: string
- *                     cantidad_numeros:
- *                       type: integer
- *                     precio_numero:
- *                       type: number
- *                     fecha_inicio:
- *                       type: string
- *                       format: date-time
- *                     fecha_fin:
- *                       type: string
- *                       format: date-time
- *                     fecha_sorteo:
- *                       type: string
- *                       format: date-time
- *                     estado:
- *                       type: string
- *                     estadisticas:
- *                       type: object
- *                       properties:
- *                         numeros_generados:
- *                           type: integer
- *                         numeros_vendidos:
- *                           type: integer
- *                         numeros_disponibles:
- *                           type: integer
- *                         total_recaudado:
- *                           type: number
- *       404:
- *         description: Rifa no encontrada
- */
 router.get('/:id', rifasController.obtenerRifa);
+
+
+
 
 /**
  * @swagger
@@ -409,61 +280,6 @@ router.post(
   rifasController.generarNumerosRifa
 );
 
-/**
- * @swagger
- * /rifas/{id}/numeros:
- *   get:
- *     summary: Obtener todos los números de una rifa
- *     description: Lista todos los números con su estado (disponible, reservado, vendido)
- *     tags: [Números]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *       - in: query
- *         name: estado
- *         schema:
- *           type: string
- *           enum: [disponible, reservado, vendido]
- *         description: Filtrar por estado
- *     responses:
- *       200:
- *         description: Lista de números
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:
- *                         type: integer
- *                       rifa_id:
- *                         type: integer
- *                       numero:
- *                         type: integer
- *                       estado:
- *                         type: string
- *                       comprador_id:
- *                         type: integer
- *                       vendedor_id:
- *                         type: integer
- *                       fecha_venta:
- *                         type: string
- *                         format: date-time
- *                       metodo_pago:
- *                         type: string
- */
-// se hizo publico -> router.get('/:id/numeros', requireAuth, rifasController.obtenerNumerosRifa);
 
 /**
  * @swagger
@@ -812,30 +628,5 @@ router.get(
   rifasController.obtenerNumerosInstitucion
 );
 
-/**
- * @swagger
- * /rifas/{rifa_id}/vendedor/numeros:
- *   get:
- *     summary: Obtener números del vendedor
- *     description: Lista los números vendidos por el vendedor actual
- *     tags: [Números]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: rifa_id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Lista de números vendidos por el vendedor
- */
-router.get(
-  '/:rifa_id/vendedor/numeros',
-  requireAuth,
-  requireRole(['vendedor', 'admin_institucion', 'admin_global']),
-  rifasController.obtenerNumerosVendedor
-);
 
 export default router;

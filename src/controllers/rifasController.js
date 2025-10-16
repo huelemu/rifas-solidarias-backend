@@ -635,7 +635,7 @@ async obtenerNumerosPublicos(req, res) {
   // FUNCIONES DE NÚMEROS (Implementadas)
   // =====================================================
 
-  async generarNumerosRifa(req, res) {
+ async generarNumerosRifa(req, res) {
   try {
     const { id } = req.params;
     
@@ -669,21 +669,15 @@ async obtenerNumerosPublicos(req, res) {
       });
     }
 
-    
-    // ✅ CONFIGURAR URL BASE (desde variable de entorno o por defecto)
-    const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:4200';
-    
-    console.log(`📍 URL base configurada: ${FRONTEND_URL}`);
-
-    // Preparar números para insertar
+    // ⭐ GUARDAR SOLO EL PATH RELATIVO (sin dominio)
     const numerosParaInsertar = [];
     
     for (let i = 1; i <= rifa.cantidad_numeros; i++) {
-      // ✅ GENERAR URL PÚBLICA PARA CADA NÚMERO
-      const urlPublica = `${FRONTEND_URL}/public/rifas/${id}/numero/${i}`;
+      // ⭐ PATH RELATIVO (funciona en cualquier dominio)
+      const pathRelativo = `/public/rifas/${id}/numero/${i}`;
       
-      // ✅ GENERAR QR CODE CON LA URL PÚBLICA
-      const qrCodeDataURL = await QRCode.toDataURL(urlPublica, {
+      // ⭐ QR con path relativo (el frontend lo completará)
+      const qrCodeDataURL = await QRCode.toDataURL(pathRelativo, {
         errorCorrectionLevel: 'H',
         margin: 1,
         width: 300,
@@ -696,13 +690,13 @@ async obtenerNumerosPublicos(req, res) {
       numerosParaInsertar.push([
         id,                           // rifa_id
         i,                            // numero
-        qrCodeDataURL,                // qr_code (Data URL con la imagen)
+        qrCodeDataURL,                // qr_code (Data URL)
         'disponible',                 // estado
         rifa.precio_numero            // precio
       ]);
     }
 
-    // Insertar todos los números en una sola operación
+    // Insertar todos los números
     const query = `
       INSERT INTO numeros_rifa 
         (rifa_id, numero, qr_code, estado, precio_venta) 
@@ -711,7 +705,7 @@ async obtenerNumerosPublicos(req, res) {
 
     await db.query(query, [numerosParaInsertar]);
 
-    console.log(`✅ ${rifa.cantidad_numeros} números generados con QR codes funcionales`);
+    console.log(`✅ ${rifa.cantidad_numeros} números generados`);
 
     res.json({
       status: 'success',
@@ -719,8 +713,7 @@ async obtenerNumerosPublicos(req, res) {
       data: {
         rifa_id: id,
         total_numeros: rifa.cantidad_numeros,
-        estado: 'activa',
-        url_ejemplo: `${FRONTEND_URL}/public/rifas/${id}/numero/1`
+        estado: 'activa'
       }
     });
 
@@ -733,6 +726,8 @@ async obtenerNumerosPublicos(req, res) {
     });
   }
 },
+
+//-----
 
   async obtenerNumerosRifa(req, res) {
     try {
@@ -1016,9 +1011,153 @@ async venderNumero(req, res) {
     res.json({ status: 'success', message: 'Función obtenerNumerosInstitucion pendiente de implementación' });
   },
 
-  async obtenerNumerosVendedor(req, res) {
-    res.json({ status: 'success', message: 'Función obtenerNumerosVendedor pendiente de implementación' });
+
+
+async obtenerMisRifasVendedor(req, res) {
+  try {
+    const vendedor_id = req.user.id;
+
+    const [rifas] = await db.execute(`
+      SELECT DISTINCT
+        r.id,
+        r.nombre,
+        r.descripcion,
+        r.imagen_url,
+        r.estado,
+        r.fecha_inicio,
+        r.fecha_fin,
+        r.fecha_sorteo,
+        COUNT(DISTINCT vn.numero_id) as numeros_asignados,
+        SUM(CASE WHEN n.estado = 'vendido' THEN 1 ELSE 0 END) as numeros_vendidos
+      FROM rifas r
+      INNER JOIN vendedor_numeros vn ON r.id = vn.rifa_id
+      LEFT JOIN numeros_rifa n ON vn.numero_id = n.id
+      WHERE vn.vendedor_id = ?
+      GROUP BY r.id
+      ORDER BY r.fecha_creacion DESC
+    `, [vendedor_id]);
+
+    res.json({
+      status: 'success',
+      data: rifas
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ status: 'error', message: error.message });
   }
+},
+
+// Obtener números asignados al vendedor
+async obtenerNumerosVendedor(req, res) {
+  try {
+    const { rifa_id } = req.params;
+    const vendedor_id = req.user.id;
+
+    const [numeros] = await db.execute(`
+      SELECT 
+        n.id,
+        n.numero,
+        n.estado,
+        n.qr_code,
+        n.comprador_nombre,
+        n.comprador_telefono,
+        n.comprador_email,
+        n.fecha_venta,
+        n.metodo_pago,
+        vn.fecha_asignacion,
+        vn.vendedor_id,
+        u.nombre AS vendedor_nombre,
+        u.apellido AS vendedor_apellido
+      FROM vendedor_numeros vn
+      INNER JOIN numeros_rifa n ON vn.numero_id = n.id
+      INNER JOIN usuarios u ON vn.vendedor_id = u.id
+      WHERE vn.rifa_id = ? AND vn.vendedor_id = ?
+      ORDER BY n.numero ASC
+    `, [rifa_id, vendedor_id]);
+
+    const [rifa] = await db.execute(
+      'SELECT id, nombre, imagen_url, precio_numero FROM rifas WHERE id = ?',
+      [rifa_id]
+    );
+
+    if (!rifa[0]) {
+      return res.status(404).json({ 
+        status: 'error', 
+        message: 'Rifa no encontrada' 
+      });
+    }
+
+    res.json({
+      status: 'success',
+      data: {
+        rifa: rifa[0],
+        numeros,
+        total_asignados: numeros.length,
+        vendidos: numeros.filter(n => n.estado === 'vendido').length,
+        disponibles: numeros.filter(n => n.estado === 'disponible').length
+      }
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+},
+
+// Vender número como vendedor
+async venderNumeroVendedor(req, res) {
+  try {
+    const { rifa_id, numero } = req.params;
+    const vendedor_id = req.user.id;
+    const { comprador_nombre, comprador_apellido, comprador_telefono, comprador_email } = req.body;
+
+    // Verificar que el número está asignado al vendedor
+    const [asignacion] = await db.execute(`
+      SELECT n.id, n.estado
+      FROM vendedor_numeros vn
+      INNER JOIN numeros_rifa n ON vn.numero_id = n.id
+      WHERE vn.rifa_id = ? 
+        AND vn.vendedor_id = ? 
+        AND n.numero = ?
+    `, [rifa_id, vendedor_id, numero]);
+
+    if (asignacion.length === 0) {
+      return res.status(403).json({ 
+        status: 'error', 
+        message: 'No tienes permiso para vender este número' 
+      });
+    }
+
+    if (asignacion[0].estado !== 'disponible') {
+      return res.status(400).json({ 
+        status: 'error', 
+        message: 'El número no está disponible' 
+      });
+    }
+
+    // Marcar como vendido
+    await db.execute(`
+      UPDATE numeros_rifa 
+      SET estado = 'vendido',
+          comprador_nombre = ?,
+          comprador_apellido = ?,
+          comprador_telefono = ?,
+          comprador_email = ?,
+          vendedor_id = ?,
+          fecha_venta = NOW()
+      WHERE id = ?
+    `, [comprador_nombre, comprador_apellido, comprador_telefono, comprador_email, vendedor_id, asignacion[0].id]);
+
+    res.json({
+      status: 'success',
+      message: 'Entrada vendida exitosamente',
+      data: { numero }
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+},
+
 };
 
 // =====================================================
