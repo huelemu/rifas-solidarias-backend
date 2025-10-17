@@ -1129,6 +1129,97 @@ export const getProfile = me;
 
 
 // =====================================================
+// UPDATE PROFILE - ACTUALIZAR PERFIL PROPIO
+// =====================================================
+
+export const updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.id; // Del token JWT
+    const { nombre, apellido, telefono, alias_mercadopago } = req.body;
+
+    console.log('📝 Actualizando perfil usuario ID:', userId);
+    console.log('📦 Datos recibidos:', { nombre, apellido, telefono, alias_mercadopago });
+
+    // Construir query dinámico
+    const campos = [];
+    const valores = [];
+
+    if (nombre) { campos.push('nombre = ?'); valores.push(nombre); }
+    if (apellido) { campos.push('apellido = ?'); valores.push(apellido); }
+    if (telefono !== undefined) { campos.push('telefono = ?'); valores.push(telefono || null); }
+    if (alias_mercadopago !== undefined) { 
+      campos.push('alias_mercadopago = ?'); 
+      valores.push(alias_mercadopago || null); 
+    }
+
+    if (campos.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No se proporcionaron campos para actualizar'
+      });
+    }
+
+    valores.push(userId);
+
+    await db.execute(
+      `UPDATE usuarios SET ${campos.join(', ')} WHERE id = ?`,
+      valores
+    );
+
+    // Obtener usuario actualizado
+    const [usuarios] = await db.execute(`
+      SELECT 
+        u.id, u.nombre, u.apellido, u.email, u.rol, u.telefono, 
+        u.alias_mercadopago, u.dni, u.estado, u.ultimo_login, u.institucion_id, 
+        i.nombre as institucion_nombre, i.logo_url as institucion_logo
+      FROM usuarios u
+      LEFT JOIN instituciones i ON u.institucion_id = i.id
+      WHERE u.id = ?
+    `, [userId]);
+
+    if (usuarios.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    res.json({
+      status: 'success',
+      message: 'Perfil actualizado exitosamente',
+      data: {
+        id: usuario.id,
+        nombre: usuario.nombre,
+        apellido: usuario.apellido,
+        email: usuario.email,
+        rol: usuario.rol,
+        telefono: usuario.telefono,
+        alias_mercadopago: usuario.alias_mercadopago,
+        dni: usuario.dni,
+        estado: usuario.estado,
+        ultimo_login: usuario.ultimo_login,
+        institucion: usuario.institucion_id ? {
+          id: usuario.institucion_id,
+          nombre: usuario.institucion_nombre,
+          logo_url: usuario.institucion_logo
+        } : null
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error al actualizar perfil:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error interno del servidor',
+      error: error.message
+    });
+  }
+};
+
+
+// =====================================================
 // RESEND VERIFICATION - REENVIAR VERIFICACIÓN
 // =====================================================
 
