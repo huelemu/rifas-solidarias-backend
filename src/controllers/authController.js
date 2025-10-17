@@ -136,7 +136,6 @@ console.log('📝 Datos limpiados:', datosLimpios);
       datosLimpios.telefono, 
       datosLimpios.dni, 
       datosLimpios.rol, 
-      datosLimpios.alias_mp,
       datosLimpios.institucion_id
     ]);
 
@@ -148,7 +147,6 @@ console.log('📝 Datos limpiados:', datosLimpios);
       datosLimpios.telefono,      // ✅ string o null
       datosLimpios.dni,           // ✅ string o null
       datosLimpios.rol,           // ✅ string
-      datosLimpios.alias_mp,
       datosLimpios.institucion_id // ✅ number o null
     ]);
 
@@ -159,7 +157,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
     // =====================================================
     
     const [nuevoUsuario] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.alias_mp, u.institucion_id,
+      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.institucion_id,
              i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -183,7 +181,6 @@ console.log('📝 Datos limpiados:', datosLimpios);
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
-      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
@@ -212,7 +209,6 @@ console.log('📝 Datos limpiados:', datosLimpios);
           apellido: usuario.apellido,
           email: usuario.email,
           rol: usuario.rol,
-          alias_mp: usuario.alias_mp,
           institucion_id: usuario.institucion_id,
           institucion_nombre: usuario.institucion_nombre || null
         },
@@ -261,7 +257,7 @@ export const login = async (req, res) => {
     // Buscar usuario por email con información completa - INCLUIR google_id
     console.log('🔍 Buscando usuario...');
     const [usuarios] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.password, u.rol, u.alias_mp,
+      SELECT u.id, u.nombre, u.apellido, u.email, u.password, u.rol, 
              u.estado, u.institucion_id, u.intentos_fallidos, u.bloqueado_hasta,
              u.google_id,
              i.nombre as institucion_nombre
@@ -330,11 +326,10 @@ export const login = async (req, res) => {
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
-      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
-    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '60m' });
+    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
     const refreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
 
     // Actualizar último login
@@ -357,7 +352,6 @@ export const login = async (req, res) => {
           apellido: usuario.apellido,
           email: usuario.email,
           rol: usuario.rol,
-          alias_mp:usuario.alias_mp,
           institucion_id: usuario.institucion_id,
           institucion_nombre: usuario.institucion_nombre,
           authMethod: 'local' // ⭐ Indicar método de autenticación
@@ -422,7 +416,6 @@ export const refreshToken = async (req, res) => {
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
-      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
@@ -467,7 +460,7 @@ export const me = async (req, res) => {
 
     const [usuarios] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.telefono, u.dni, 
-             u.estado, u.alias_mp, u.ultimo_login, u.institucion_id, 
+             u.estado, u.ultimo_login, u.institucion_id, 
              i.nombre as institucion_nombre, i.logo_url as institucion_logo
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -493,7 +486,6 @@ export const me = async (req, res) => {
         email: usuario.email,
         rol: usuario.rol,
         telefono: usuario.telefono,
-        alias_mp: usuario.alias_mp,
         dni: usuario.dni,
         estado: usuario.estado,
         ultimo_login: usuario.ultimo_login,
@@ -562,7 +554,7 @@ export const forgotPassword = async (req, res) => {
 
     // Buscar usuario por email - INCLUIR google_id
     const [usuarios] = await db.execute(
-      'SELECT id, nombre, email, alias_mp, estado, google_id FROM usuarios WHERE email = ?',
+      'SELECT id, nombre, email, estado, google_id FROM usuarios WHERE email = ?',
       [email]
     );
 
@@ -947,7 +939,7 @@ export const handleGoogleCallback = async (req, res) => {
     console.log('🔍 Buscando usuario existente en la base de datos...');
     const [existingUsers] = await db.execute(`
       SELECT 
-        u.id, u.nombre, u.apellido, u.email, u.rol, u.alias_mp, u.estado, u.email_verificado,
+        u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, u.email_verificado,
         u.institucion_id, u.google_id, i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -1031,7 +1023,7 @@ export const handleGoogleCallback = async (req, res) => {
           id: usuario.id,
           email: usuario.email,
           nombre: usuario.nombre,
-          apellido: usuario.apellido,
+          apellido: usuario.apellido
         });
 
         // Continuar con generación de tokens...
@@ -1051,7 +1043,7 @@ export const handleGoogleCallback = async (req, res) => {
       console.log('✅ Usuario existente encontrado:', {
         id: usuario.id,
         email: usuario.email,
-        estado: usuario.estado,
+        estado: usuario.estado
       });
 
       if (usuario.estado !== 'activo') {
@@ -1134,97 +1126,6 @@ async function generarTokensYRedirigir(usuario, res, returnUrl = null) {
 // ✅ ALIAS PARA COMPATIBILIDAD
 export const getProfile = me;
 
-
-
-// =====================================================
-// UPDATE PROFILE - ACTUALIZAR PERFIL PROPIO
-// =====================================================
-
-export const updateProfile = async (req, res) => {
-  try {
-    const userId = req.user.id; // Del token JWT
-    const { nombre, apellido, telefono, alias_mp } = req.body;
-
-    console.log('📝 Actualizando perfil usuario ID:', userId);
-    console.log('📦 Datos recibidos:', { nombre, apellido, telefono, alias_mp });
-
-    // Construir query dinámico
-    const campos = [];
-    const valores = [];
-
-    if (nombre) { campos.push('nombre = ?'); valores.push(nombre); }
-    if (apellido) { campos.push('apellido = ?'); valores.push(apellido); }
-    if (telefono !== undefined) { campos.push('telefono = ?'); valores.push(telefono || null); }
-    if (alias_mp !== undefined) { 
-      campos.push('alias_mp = ?'); 
-      valores.push(alias_mp || null); 
-    }
-
-    if (campos.length === 0) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'No se proporcionaron campos para actualizar'
-      });
-    }
-
-    valores.push(userId);
-
-    await db.execute(
-      `UPDATE usuarios SET ${campos.join(', ')} WHERE id = ?`,
-      valores
-    );
-
-    // Obtener usuario actualizado
-    const [usuarios] = await db.execute(`
-      SELECT 
-        u.id, u.nombre, u.apellido, u.email, u.rol, u.telefono, 
-        u.alias_mp, u.dni, u.estado, u.ultimo_login, u.institucion_id, 
-        i.nombre as institucion_nombre, i.logo_url as institucion_logo
-      FROM usuarios u
-      LEFT JOIN instituciones i ON u.institucion_id = i.id
-      WHERE u.id = ?
-    `, [userId]);
-
-    if (usuarios.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Usuario no encontrado'
-      });
-    }
-
-    const usuario = usuarios[0];
-
-    res.json({
-      status: 'success',
-      message: 'Perfil actualizado exitosamente',
-      data: {
-        id: usuario.id,
-        nombre: usuario.nombre,
-        apellido: usuario.apellido,
-        email: usuario.email,
-        rol: usuario.rol,
-        telefono: usuario.telefono,
-        alias_mp: usuario.alias_mp,
-        dni: usuario.dni,
-        estado: usuario.estado,
-        ultimo_login: usuario.ultimo_login,
-        institucion: usuario.institucion_id ? {
-          id: usuario.institucion_id,
-          nombre: usuario.institucion_nombre,
-          logo_url: usuario.institucion_logo
-        } : null
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error al actualizar perfil:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor',
-      error: error.message
-    });
-  }
-};
 
 
 // =====================================================
