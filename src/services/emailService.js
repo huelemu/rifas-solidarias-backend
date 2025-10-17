@@ -566,10 +566,15 @@ export async function enviarEmailConfirmacionComprador(reserva, rifa, numeros) {
           ${reserva.whatsapp_link ? `
           <div style="text-align: center; margin: 30px 0;">
             <a href="${reserva.whatsapp_link}" 
-               style="background: #25D366; color: white; padding: 12px 24px; 
+              style="background: #25D366; color: white; padding: 12px 24px; 
                       text-decoration: none; border-radius: 6px; display: inline-block;">
               💬 Contactar por WhatsApp
             </a>
+            ${vendedor.alias_mp ? `
+              <p style="margin-top: 10px; color: #718096;">
+                💳 Alias MP: <strong>${vendedor.alias_mp}</strong>
+              </p>
+            ` : ''}
           </div>
           ` : ''}
           

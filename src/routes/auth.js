@@ -9,6 +9,7 @@ import {
   register, 
   login, 
   refreshToken, 
+  updateProfile,
   logout, 
   getProfile,
   getGoogleLoginUrl,
@@ -388,32 +389,38 @@ router.get('/check-verification/:email', async (req, res) => {
 // 🔒 RUTAS PROTEGIDAS (REQUIEREN AUTENTICACIÓN)
 // =====================================================
 
+// ⬅️ AGREGAR ESTA RUTA (después de la ruta /me GET)
 /**
  * @swagger
  * /auth/me:
- *   get:
- *     summary: Obtener perfil del usuario actual
- *     description: Retorna la información del usuario autenticado
+ *   put:
+ *     summary: Actualizar perfil del usuario actual
+ *     description: Permite al usuario actualizar su propio perfil
  *     tags: [Autenticación]
  *     security:
  *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nombre:
+ *                 type: string
+ *               apellido:
+ *                 type: string
+ *               telefono:
+ *                 type: string
+ *               alias_mercadopago:
+ *                 type: string
  *     responses:
  *       200:
- *         description: Perfil del usuario
- *         content:
- *           application/json:
- *             example:
- *               status: success
- *               data:
- *                 id: 1
- *                 nombre: Juan
- *                 apellido: Pérez
- *                 email: admin@test.com
- *                 rol: admin_global
- *                 institucion_id: 1
+ *         description: Perfil actualizado exitosamente
  *       401:
  *         description: No autorizado
  */
+router.put('/me', requireAuth, updateProfile);
 router.get('/me', requireAuth, getProfile);
 
 /**

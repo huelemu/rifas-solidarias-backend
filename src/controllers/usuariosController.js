@@ -73,7 +73,7 @@ export const obtenerUsuarios = async (req, res) => {
     // Query principal con filtros
     const mainQuery = `
       SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
-             u.rol, u.estado, u.fecha_creacion, u.ultimo_login,
+             u.rol, u.alias_mp, u.estado, u.fecha_creacion, u.ultimo_login,
              i.nombre as institucion_nombre, i.id as institucion_id
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -138,7 +138,7 @@ export const obtenerUsuarioPorId = async (req, res) => {
 
     const [usuarios] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
-             u.rol, u.estado, u.fecha_creacion,
+             u.rol, u.alias_mp, u.estado, u.fecha_creacion,
              i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -170,7 +170,7 @@ export const obtenerUsuarioPorId = async (req, res) => {
 // POST /usuarios - Crear nuevo usuario
 export const crearUsuario = async (req, res) => {
   try {
-    const { nombre, apellido, email, password, telefono, dni, rol, institucion_id } = req.body;
+    const { nombre, apellido, email, password, telefono, dni, rol, alias_mp, institucion_id } = req.body;
 
     // Validaciones básicas
     if (!nombre || !apellido || !email || !password || !rol) {
@@ -198,7 +198,7 @@ export const crearUsuario = async (req, res) => {
 
     // Insertar usuario
     const [result] = await db.execute(
-      `INSERT INTO usuarios (nombre, apellido, email, password, telefono, dni, rol, institucion_id) 
+      `INSERT INTO usuarios (nombre, apellido, email, password, telefono, dni, rol, alias_mp, institucion_id) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         nombre, 
@@ -207,14 +207,15 @@ export const crearUsuario = async (req, res) => {
         passwordHash, 
         telefono || null, 
         dni || null, 
-        rol, 
+        rol,
+        alias_mp || null, 
         institucion_id || null
       ]
     );
 
     // Obtener usuario creado
     const [nuevoUsuario] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
+      SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.alias_mp, u.dni, 
              u.rol, u.estado, u.fecha_creacion,
              i.nombre as institucion_nombre
       FROM usuarios u
@@ -283,7 +284,7 @@ export const actualizarUsuario = async (req, res) => {
     // Obtener usuario actualizado
     const [usuarioActualizado] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.dni, 
-             u.rol, u.estado, u.fecha_creacion,
+             u.rol, u.estado, u.alias_mp, u.fecha_creacion,
              i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
