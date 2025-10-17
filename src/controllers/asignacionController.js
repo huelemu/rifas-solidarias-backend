@@ -128,7 +128,7 @@ export const asignarInstitucionesARifa = async (req, res) => {
         cantidad_numeros: cantidad
       });
 
-      // ✅ ACTUALIZAR números existentes (NO INSERTAR)
+      // Actualizar números existentes (NO INSERTAR)
       console.log(`  📝 Actualizando ${cantidad} números existentes...`);
       
       const [updateResult] = await connection.execute(
@@ -195,7 +195,8 @@ export const obtenerInstitucionesDeRifa = async (req, res) => {
       LEFT JOIN numeros_rifa nr ON nr.rifa_id = ri.rifa_id 
         AND nr.institucion_id = ri.institucion_id
       WHERE ri.rifa_id = ?
-      GROUP BY ri.id, i.id, i.nombre, i.logo_url, i.estado
+      GROUP BY ri.id, i.id, i.nombre, i.logo_url, i.estado, ri.numero_desde, 
+               ri.numero_hasta, ri.cantidad_numeros, ri.estado
       ORDER BY ri.numero_desde ASC`,
       [rifaId]
     );
@@ -232,7 +233,7 @@ export const obtenerInstitucionesDeRifa = async (req, res) => {
 };
 
 // ==========================================
-// ASIGNAR NÚMEROS A VENDEDOR
+// ASIGNAR NÚMEROS A VENDEDOR (3 MODALIDADES + DOBLE REGISTRO)
 // ==========================================
 export const asignarNumerosAVendedor = async (req, res) => {
   const connection = await db.getConnection();
@@ -241,24 +242,44 @@ export const asignarNumerosAVendedor = async (req, res) => {
     await connection.beginTransaction();
 
     const { rifaInstitucionId } = req.params;
-    const { vendedor_id, cantidad } = req.body;
+    const { 
+      vendedor_id, 
+      tipo_asignacion,
+      numeros,      // Para 'individual': [1, 5, 10, 20]
+      rango,        // Para 'rango': { desde: 100, hasta: 150 }
+      cantidad      // Para 'aleatorio': 25
+    } = req.body;
 
-    console.log('👤 Asignando números a vendedor:', { rifaInstitucionId, vendedor_id, cantidad });
+    console.log('👤 Asignando números a vendedor:', { 
+      rifaInstitucionId, 
+      vendedor_id, 
+      tipo_asignacion 
+    });
 
-    // Validaciones
-    if (!vendedor_id || !cantidad || cantidad <= 0) {
+    // ===== VALIDACIONES BÁSICAS =====
+    if (!vendedor_id || !tipo_asignacion) {
       await connection.rollback();
       return res.status(400).json({
         status: 'error',
-        message: 'Debe proporcionar vendedor_id y cantidad válida'
+        message: 'Debe proporcionar vendedor_id y tipo_asignacion'
       });
     }
 
-    // Verificar que el bloque institución existe
+    const tiposValidos = ['individual', 'rango', 'aleatorio'];
+    if (!tiposValidos.includes(tipo_asignacion)) {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: `Tipo de asignación inválido. Use: ${tiposValidos.join(', ')}`
+      });
+    }
+
+    // ===== VERIFICAR BLOQUE INSTITUCIÓN =====
     const [rifaInstituciones] = await connection.execute(
-      `SELECT ri.*, i.nombre as institucion_nombre
+      `SELECT ri.*, i.nombre as institucion_nombre, r.estado as rifa_estado
        FROM rifa_instituciones ri
        INNER JOIN instituciones i ON ri.institucion_id = i.id
+       INNER JOIN rifas r ON ri.rifa_id = r.id
        WHERE ri.id = ?`,
       [rifaInstitucionId]
     );
@@ -273,8 +294,15 @@ export const asignarNumerosAVendedor = async (req, res) => {
 
     const rifaInstitucion = rifaInstituciones[0];
 
-    // ✅ Verificar vendedor - Adaptable a 'activo' o 'estado'
-    // Primero intentamos con 'estado', si falla probamos con 'activo'
+    if (rifaInstitucion.rifa_estado !== 'activa') {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: 'Solo se pueden asignar números en rifas activas'
+      });
+    }
+
+    // ===== VERIFICAR VENDEDOR =====
     let vendedor;
     try {
       const [vendedores] = await connection.execute(
@@ -283,7 +311,6 @@ export const asignarNumerosAVendedor = async (req, res) => {
       );
       vendedor = vendedores[0];
     } catch (error) {
-      // Si falla, probablemente usa 'activo' en lugar de 'estado'
       const [vendedores] = await connection.execute(
         'SELECT * FROM usuarios WHERE id = ? AND rol = "vendedor" AND activo = 1',
         [vendedor_id]
@@ -299,62 +326,219 @@ export const asignarNumerosAVendedor = async (req, res) => {
       });
     }
 
-    // Buscar números disponibles en el rango de la institución
-    const [numerosDisponibles] = await connection.execute(
-      `SELECT id, numero 
-       FROM numeros_rifa
-       WHERE rifa_id = ?
-         AND institucion_id = ?
-         AND vendedor_id IS NULL
-         AND estado = 'disponible'
-         AND numero BETWEEN ? AND ?
-       ORDER BY numero ASC
-       LIMIT ?`,
-      [
-        rifaInstitucion.rifa_id,
-        rifaInstitucion.institucion_id,
-        rifaInstitucion.numero_desde,
-        rifaInstitucion.numero_hasta,
-        cantidad
-      ]
-    );
-
-    if (numerosDisponibles.length < cantidad) {
+    if (vendedor.institucion_id && vendedor.institucion_id !== rifaInstitucion.institucion_id) {
       await connection.rollback();
-      return res.status(400).json({
+      return res.status(403).json({
         status: 'error',
-        message: `Solo hay ${numerosDisponibles.length} números disponibles, se solicitaron ${cantidad}`
+        message: 'El vendedor no pertenece a esta institución'
       });
     }
 
-    // Asignar números al vendedor
-    const numerosIds = numerosDisponibles.map(n => n.id);
-    const placeholders = numerosIds.map(() => '?').join(',');
+    // ===== DETERMINAR QUÉ NÚMEROS ASIGNAR =====
+    let numerosAAsignar = [];
+
+    switch (tipo_asignacion) {
+      case 'individual':
+        if (!numeros || !Array.isArray(numeros) || numeros.length === 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            status: 'error',
+            message: 'Debe proporcionar un array de números para asignación individual'
+          });
+        }
+
+        const numerosInvalidos = numeros.filter(
+          n => n < rifaInstitucion.numero_desde || n > rifaInstitucion.numero_hasta
+        );
+
+        if (numerosInvalidos.length > 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            status: 'error',
+            message: `Números fuera del rango (${rifaInstitucion.numero_desde}-${rifaInstitucion.numero_hasta}): ${numerosInvalidos.join(', ')}`
+          });
+        }
+
+        numerosAAsignar = numeros.sort((a, b) => a - b);
+        break;
+
+      case 'rango':
+        if (!rango || !rango.desde || !rango.hasta) {
+          await connection.rollback();
+          return res.status(400).json({
+            status: 'error',
+            message: 'Debe proporcionar rango.desde y rango.hasta'
+          });
+        }
+
+        const desde = parseInt(rango.desde);
+        const hasta = parseInt(rango.hasta);
+
+        if (isNaN(desde) || isNaN(hasta) || desde > hasta) {
+          await connection.rollback();
+          return res.status(400).json({
+            status: 'error',
+            message: 'Rango inválido'
+          });
+        }
+
+        if (desde < rifaInstitucion.numero_desde || hasta > rifaInstitucion.numero_hasta) {
+          await connection.rollback();
+          return res.status(400).json({
+            status: 'error',
+            message: `El rango debe estar entre ${rifaInstitucion.numero_desde} y ${rifaInstitucion.numero_hasta}`
+          });
+        }
+
+        for (let i = desde; i <= hasta; i++) {
+          numerosAAsignar.push(i);
+        }
+        break;
+
+      case 'aleatorio':
+        if (!cantidad || cantidad <= 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            status: 'error',
+            message: 'Debe proporcionar una cantidad válida (mayor a 0)'
+          });
+        }
+
+        // Obtener números disponibles (que NO estén en vendedor_numeros con estado 'asignado')
+        const [disponibles] = await connection.execute(
+          `SELECT nr.id, nr.numero 
+           FROM numeros_rifa nr
+           LEFT JOIN vendedor_numeros vn ON vn.numero_id = nr.id AND vn.estado = 'asignado'
+           WHERE nr.rifa_id = ?
+             AND nr.institucion_id = ?
+             AND nr.estado = 'disponible'
+             AND nr.numero BETWEEN ? AND ?
+             AND vn.id IS NULL
+           ORDER BY nr.numero ASC`,
+          [
+            rifaInstitucion.rifa_id,
+            rifaInstitucion.institucion_id,
+            rifaInstitucion.numero_desde,
+            rifaInstitucion.numero_hasta
+          ]
+        );
+
+        if (disponibles.length < cantidad) {
+          await connection.rollback();
+          return res.status(400).json({
+            status: 'error',
+            message: `Solo hay ${disponibles.length} números disponibles, solicitó ${cantidad}`
+          });
+        }
+
+        // Fisher-Yates shuffle
+        const numerosDisponibles = [...disponibles];
+        for (let i = numerosDisponibles.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [numerosDisponibles[i], numerosDisponibles[j]] = [numerosDisponibles[j], numerosDisponibles[i]];
+        }
+
+        numerosAAsignar = numerosDisponibles.slice(0, cantidad).map(n => n.numero).sort((a, b) => a - b);
+        break;
+    }
+
+    console.log(`  📋 Números a asignar: ${numerosAAsignar.length}`);
+
+    // ===== OBTENER IDs DE LOS NÚMEROS Y VERIFICAR DISPONIBILIDAD =====
+    const placeholders = numerosAAsignar.map(() => '?').join(',');
+    const [numerosDB] = await connection.execute(
+      `SELECT nr.id, nr.numero, nr.estado, nr.vendedor_id
+       FROM numeros_rifa nr
+       WHERE nr.rifa_id = ?
+         AND nr.institucion_id = ?
+         AND nr.numero IN (${placeholders})`,
+      [rifaInstitucion.rifa_id, rifaInstitucion.institucion_id, ...numerosAAsignar]
+    );
+
+    if (numerosDB.length !== numerosAAsignar.length) {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: 'Algunos números no existen en esta institución'
+      });
+    }
+
+    // Verificar que NO estén ya asignados en vendedor_numeros
+    const numerosIds = numerosDB.map(n => n.id);
+    const placeholdersIds = numerosIds.map(() => '?').join(',');
     
+    const [yaAsignados] = await connection.execute(
+      `SELECT vn.numero_id, nr.numero
+       FROM vendedor_numeros vn
+       INNER JOIN numeros_rifa nr ON vn.numero_id = nr.id
+       WHERE vn.numero_id IN (${placeholdersIds})
+         AND vn.estado = 'asignado'`,
+      numerosIds
+    );
+
+    if (yaAsignados.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: `Los siguientes números ya están asignados: ${yaAsignados.map(n => n.numero).join(', ')}`
+      });
+    }
+
+    // Verificar que estén en estado disponible
+    const noDisponibles = numerosDB.filter(n => n.estado !== 'disponible');
+    if (noDisponibles.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: `Números no disponibles: ${noDisponibles.map(n => n.numero).join(', ')}`
+      });
+    }
+
+    // ===== 1. INSERTAR EN TABLA INTERMEDIA vendedor_numeros =====
+    const valoresInsert = numerosDB.map(n => 
+      `(${rifaInstitucion.rifa_id}, ${vendedor_id}, ${n.id}, NOW(), 'asignado')`
+    ).join(',');
+
     await connection.execute(
-      `UPDATE numeros_rifa SET vendedor_id = ? WHERE id IN (${placeholders})`,
+      `INSERT INTO vendedor_numeros 
+       (rifa_id, vendedor_id, numero_id, fecha_asignacion, estado)
+       VALUES ${valoresInsert}`
+    );
+
+    console.log(`  ✅ ${numerosDB.length} registros insertados en vendedor_numeros`);
+
+    // ===== 2. ACTUALIZAR CAMPO vendedor_id EN numeros_rifa =====
+    await connection.execute(
+      `UPDATE numeros_rifa 
+       SET vendedor_id = ?
+       WHERE id IN (${placeholdersIds})`,
       [vendedor_id, ...numerosIds]
     );
 
-    // Registrar la asignación
-    const primerNumero = numerosDisponibles[0].numero;
-    const ultimoNumero = numerosDisponibles[numerosDisponibles.length - 1].numero;
+    console.log(`  ✅ ${numerosDB.length} números actualizados con vendedor_id en numeros_rifa`);
+
+    // ===== 3. REGISTRAR RESUMEN EN rifa_vendedores =====
+    const primerNumero = numerosAAsignar[0];
+    const ultimoNumero = numerosAAsignar[numerosAAsignar.length - 1];
 
     const [resultAsignacion] = await connection.execute(
       `INSERT INTO rifa_vendedores 
       (rifa_institucion_id, vendedor_id, numero_desde, numero_hasta, cantidad_asignada, cantidad_vendida)
-      VALUES (?, ?, ?, ?, ?, 0)`,
-      [rifaInstitucionId, vendedor_id, primerNumero, ultimoNumero, cantidad]
+      VALUES (?, ?, ?, ?, ?, 0)
+      ON DUPLICATE KEY UPDATE
+        cantidad_asignada = cantidad_asignada + VALUES(cantidad_asignada),
+        numero_hasta = VALUES(numero_hasta)`,
+      [rifaInstitucionId, vendedor_id, primerNumero, ultimoNumero, numerosAAsignar.length]
     );
 
     await connection.commit();
-    console.log('✅ Números asignados exitosamente');
+    console.log('✅ Asignación completada exitosamente');
 
     res.status(201).json({
       status: 'success',
-      message: 'Números asignados al vendedor exitosamente',
+      message: `${numerosAAsignar.length} número(s) asignado(s) exitosamente a ${vendedor.nombre}`,
       data: {
-        asignacion_id: resultAsignacion.insertId,
+        tipo_asignacion,
         vendedor: {
           id: vendedor.id,
           nombre: vendedor.nombre,
@@ -363,14 +547,14 @@ export const asignarNumerosAVendedor = async (req, res) => {
         institucion: rifaInstitucion.institucion_nombre,
         numero_desde: primerNumero,
         numero_hasta: ultimoNumero,
-        cantidad_asignada: cantidad,
-        numeros_asignados: numerosDisponibles.map(n => n.numero)
+        cantidad_asignada: numerosAAsignar.length,
+        numeros_asignados: numerosAAsignar
       }
     });
 
   } catch (error) {
     await connection.rollback();
-    console.error('❌ Error al asignar números a vendedor:', error);
+    console.error('❌ Error al asignar números:', error);
     res.status(500).json({
       status: 'error',
       message: 'Error al asignar números al vendedor',
@@ -413,6 +597,9 @@ export const obtenerVendedoresDeInstitucion = async (req, res) => {
       numero_hasta: v.numero_hasta,
       cantidad_asignada: v.cantidad_asignada,
       cantidad_vendida: v.cantidad_vendida,
+      porcentaje_vendido: v.cantidad_asignada > 0 
+        ? ((v.cantidad_vendida / v.cantidad_asignada) * 100).toFixed(2) 
+        : '0.00',
       fecha_asignacion: v.fecha_asignacion,
       vendedor: {
         id: v.vendedor_id,
@@ -434,5 +621,252 @@ export const obtenerVendedoresDeInstitucion = async (req, res) => {
       message: 'Error al obtener vendedores',
       error: error.message
     });
+  }
+};
+
+// ==========================================
+// OBTENER NÚMEROS DISPONIBLES DE INSTITUCIÓN
+// ==========================================
+export const obtenerNumerosDisponiblesDeInstitucion = async (req, res) => {
+  try {
+    const { rifaInstitucionId } = req.params;
+
+    // Obtener info de la institución
+    const [rifaInstituciones] = await db.execute(
+      `SELECT ri.*, i.nombre as institucion_nombre
+       FROM rifa_instituciones ri
+       INNER JOIN instituciones i ON ri.institucion_id = i.id
+       WHERE ri.id = ?`,
+      [rifaInstitucionId]
+    );
+
+    if (rifaInstituciones.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Bloque de institución no encontrado'
+      });
+    }
+
+    const rifaInstitucion = rifaInstituciones[0];
+
+    // Obtener números disponibles (que NO estén asignados en vendedor_numeros)
+    const [numeros] = await db.execute(
+      `SELECT nr.numero
+       FROM numeros_rifa nr
+       LEFT JOIN vendedor_numeros vn ON vn.numero_id = nr.id AND vn.estado = 'asignado'
+       WHERE nr.rifa_id = ?
+         AND nr.institucion_id = ?
+         AND nr.estado = 'disponible'
+         AND nr.numero BETWEEN ? AND ?
+         AND vn.id IS NULL
+       ORDER BY nr.numero ASC`,
+      [
+        rifaInstitucion.rifa_id,
+        rifaInstitucion.institucion_id,
+        rifaInstitucion.numero_desde,
+        rifaInstitucion.numero_hasta
+      ]
+    );
+
+    res.json({
+      status: 'success',
+      data: {
+        institucion: rifaInstitucion.institucion_nombre,
+        rango: {
+          inicio: rifaInstitucion.numero_desde,
+          fin: rifaInstitucion.numero_hasta,
+          total: rifaInstitucion.numero_hasta - rifaInstitucion.numero_desde + 1
+        },
+        disponibles: {
+          total: numeros.length,
+          numeros: numeros.map(n => n.numero)
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error al obtener números disponibles:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener números disponibles',
+      error: error.message
+    });
+  }
+};
+
+// ==========================================
+// OBTENER NÚMEROS ASIGNADOS A UN VENDEDOR
+// ==========================================
+export const obtenerNumerosAsignadosAVendedor = async (req, res) => {
+  try {
+    const { vendedorId } = req.params;
+    const { rifaInstitucionId } = req.query;
+
+    let query = `
+      SELECT 
+        nr.id,
+        nr.numero,
+        nr.estado,
+        vn.fecha_asignacion,
+        vn.estado as asignacion_estado,
+        nr.rifa_id,
+        r.titulo as rifa_titulo,
+        r.estado as rifa_estado,
+        ri.id as rifa_institucion_id,
+        i.nombre as institucion_nombre
+      FROM vendedor_numeros vn
+      INNER JOIN numeros_rifa nr ON vn.numero_id = nr.id
+      INNER JOIN rifas r ON nr.rifa_id = r.id
+      LEFT JOIN instituciones i ON nr.institucion_id = i.id
+      LEFT JOIN rifa_instituciones ri ON ri.rifa_id = nr.rifa_id AND ri.institucion_id = nr.institucion_id
+      WHERE vn.vendedor_id = ?
+        AND vn.estado = 'asignado'
+    `;
+
+    const params = [vendedorId];
+
+    if (rifaInstitucionId) {
+      query += ' AND ri.id = ?';
+      params.push(rifaInstitucionId);
+    }
+
+    query += ' ORDER BY nr.rifa_id ASC, nr.numero ASC';
+
+    const [numeros] = await db.execute(query, params);
+
+    // Agrupar por rifa
+    const agrupadosPorRifa = numeros.reduce((acc, numero) => {
+      const rifaId = numero.rifa_id;
+      if (!acc[rifaId]) {
+        acc[rifaId] = {
+          rifa: {
+            id: numero.rifa_id,
+            titulo: numero.rifa_titulo,
+            estado: numero.rifa_estado
+          },
+          institucion: {
+            id: numero.rifa_institucion_id,
+            nombre: numero.institucion_nombre
+          },
+          numeros: []
+        };
+      }
+      acc[rifaId].numeros.push({
+        id: numero.id,
+        numero: numero.numero,
+        estado: numero.estado,
+        asignacion_estado: numero.asignacion_estado,
+        fecha_asignacion: numero.fecha_asignacion
+      });
+      return acc;
+    }, {});
+
+    res.json({
+      status: 'success',
+      data: {
+        total: numeros.length,
+        rifas: Object.values(agrupadosPorRifa)
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error al obtener números del vendedor:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener números del vendedor',
+      error: error.message
+    });
+  }
+};
+
+// ==========================================
+// LIBERAR NÚMEROS ASIGNADOS
+// ==========================================
+export const liberarNumerosDeVendedor = async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const { numero_ids } = req.body;
+
+    console.log('🔓 Liberando números:', { numero_ids });
+
+    if (!numero_ids || !Array.isArray(numero_ids) || numero_ids.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: 'Debe proporcionar un array de IDs de números (de numeros_rifa)'
+      });
+    }
+
+    // Verificar que los números existen
+    const placeholders = numero_ids.map(() => '?').join(',');
+    const [numeros] = await connection.execute(
+      `SELECT id, numero, estado FROM numeros_rifa WHERE id IN (${placeholders})`,
+      numero_ids
+    );
+
+    if (numeros.length !== numero_ids.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        status: 'error',
+        message: 'Algunos números no fueron encontrados'
+      });
+    }
+
+    // Verificar que no están vendidos
+    const vendidos = numeros.filter(n => n.estado === 'vendido');
+    if (vendidos.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: `No se pueden liberar números vendidos: ${vendidos.map(n => n.numero).join(', ')}`
+      });
+    }
+
+    // ===== 1. MARCAR COMO LIBERADO EN vendedor_numeros =====
+    await connection.execute(
+      `UPDATE vendedor_numeros 
+       SET estado = 'liberado', fecha_liberacion = NOW()
+       WHERE numero_id IN (${placeholders})
+         AND estado = 'asignado'`,
+      numero_ids
+    );
+
+    console.log(`  ✅ Registros actualizados en vendedor_numeros`);
+
+    // ===== 2. LIMPIAR vendedor_id EN numeros_rifa =====
+    await connection.execute(
+      `UPDATE numeros_rifa 
+       SET vendedor_id = NULL
+       WHERE id IN (${placeholders})
+         AND estado = 'disponible'`,
+      numero_ids
+    );
+
+    console.log(`  ✅ Campo vendedor_id limpiado en numeros_rifa`);
+
+    await connection.commit();
+
+    res.json({
+      status: 'success',
+      message: `${numeros.length} número(s) liberado(s) exitosamente`,
+      data: {
+        cantidad_liberada: numeros.length,
+        numeros_liberados: numeros.map(n => n.numero)
+      }
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('❌ Error al liberar números:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al liberar números',
+      error: error.message
+    });
+  } finally {
+    connection.release();
   }
 };
