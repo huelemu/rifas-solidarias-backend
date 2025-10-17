@@ -9,7 +9,7 @@ import {
   register, 
   login, 
   refreshToken, 
-  update1Profile,
+  updateProfile,
   logout, 
   getProfile,
   getGoogleLoginUrl,
