@@ -76,7 +76,7 @@ export const authenticateToken = async (req, res, next) => {
     
     // Verificar que el usuario existe y está activo
     const [usuarios] = await db.execute(
-      'SELECT id, email, rol, estado, institucion_id FROM usuarios WHERE id = ?',
+      'SELECT id, email, rol, alias_mp, estado, institucion_id FROM usuarios WHERE id = ?',
       [userId]
     );
 
@@ -244,7 +244,7 @@ export const optionalAuth = async (req, res, next) => {
       if (userId) {
         // Verificar usuario
         const [usuarios] = await db.execute(
-          'SELECT id, email, rol, estado, institucion_id FROM usuarios WHERE id = ?',
+          'SELECT id, email, rol, alias_mp, estado, institucion_id FROM usuarios WHERE id = ?',
           [userId]
         );
 
@@ -394,6 +394,7 @@ export const generateTokens = (user) => {
     userId: user.id,
     email: user.email,
     rol: user.rol,
+    alias_mp: user.alias_mp,
     institucion_id: user.institucion_id
   };
 

@@ -994,10 +994,10 @@ export const handleGoogleCallback = async (req, res) => {
 
         const [result] = await db.execute(`
           INSERT INTO usuarios (
-            nombre, apellido, email, password, telefono, dni, alias_mp, 
+            nombre, apellido, email, password, telefono, dni, 
             rol, institucion_id, google_id, email_verificado,
             estado, fecha_creacion, fecha_actualizacion
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', NOW(), NOW())
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', NOW(), NOW())
         `, [
           datosUsuario.nombre,
           datosUsuario.apellido, 
@@ -1005,7 +1005,6 @@ export const handleGoogleCallback = async (req, res) => {
           datosUsuario.password,     // null para usuarios Google
           datosUsuario.telefono,     // null
           datosUsuario.dni,          // null
-          datosUsuario.alias_mp,
           datosUsuario.rol,
           datosUsuario.institucion_id, // null
           datosUsuario.google_id,
@@ -1016,7 +1015,7 @@ export const handleGoogleCallback = async (req, res) => {
 
         // Obtener el usuario creado
         const [nuevoUsuario] = await db.execute(`
-          SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.alias_mp, u.estado, 
+          SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, 
                  u.institucion_id, i.nombre as institucion_nombre
           FROM usuarios u
           LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -1033,7 +1032,6 @@ export const handleGoogleCallback = async (req, res) => {
           email: usuario.email,
           nombre: usuario.nombre,
           apellido: usuario.apellido,
-          alias_mp:usuario.alias_mp
         });
 
         // Continuar con generación de tokens...
@@ -1054,7 +1052,6 @@ export const handleGoogleCallback = async (req, res) => {
         id: usuario.id,
         email: usuario.email,
         estado: usuario.estado,
-        alias_mp: usuario.alias_mp
       });
 
       if (usuario.estado !== 'activo') {
@@ -1097,7 +1094,6 @@ async function generarTokensYRedirigir(usuario, res, returnUrl = null) {
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
-      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
