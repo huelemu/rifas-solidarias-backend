@@ -460,7 +460,7 @@ export const me = async (req, res) => {
 
     const [usuarios] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.telefono, u.dni, 
-             u.estado, u.alias_mp u.ultimo_login, u.institucion_id, 
+             u.estado, u.alias_mp, u.ultimo_login, u.institucion_id, 
              i.nombre as institucion_nombre, i.logo_url as institucion_logo
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
