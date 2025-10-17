@@ -136,6 +136,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
       datosLimpios.telefono, 
       datosLimpios.dni, 
       datosLimpios.rol, 
+      datosLimpios.alias_mp,
       datosLimpios.institucion_id
     ]);
 
@@ -147,6 +148,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
       datosLimpios.telefono,      // ✅ string o null
       datosLimpios.dni,           // ✅ string o null
       datosLimpios.rol,           // ✅ string
+      datosLimpios.alias_mp,
       datosLimpios.institucion_id // ✅ number o null
     ]);
 
@@ -157,7 +159,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
     // =====================================================
     
     const [nuevoUsuario] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.institucion_id,
+      SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.alias_mp, u.institucion_id,
              i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -181,6 +183,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
+      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
@@ -209,6 +212,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
           apellido: usuario.apellido,
           email: usuario.email,
           rol: usuario.rol,
+          alias_mp: usuario.alias_mp,
           institucion_id: usuario.institucion_id,
           institucion_nombre: usuario.institucion_nombre || null
         },
@@ -257,7 +261,7 @@ export const login = async (req, res) => {
     // Buscar usuario por email con información completa - INCLUIR google_id
     console.log('🔍 Buscando usuario...');
     const [usuarios] = await db.execute(`
-      SELECT u.id, u.nombre, u.apellido, u.email, u.password, u.rol, 
+      SELECT u.id, u.nombre, u.apellido, u.email, u.password, u.rol, u.alias_mp,
              u.estado, u.institucion_id, u.intentos_fallidos, u.bloqueado_hasta,
              u.google_id,
              i.nombre as institucion_nombre
@@ -326,10 +330,11 @@ export const login = async (req, res) => {
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
+      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
-    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '60m' });
     const refreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
 
     // Actualizar último login
@@ -352,6 +357,7 @@ export const login = async (req, res) => {
           apellido: usuario.apellido,
           email: usuario.email,
           rol: usuario.rol,
+          alias_mp:usuario.alias_mp,
           institucion_id: usuario.institucion_id,
           institucion_nombre: usuario.institucion_nombre,
           authMethod: 'local' // ⭐ Indicar método de autenticación
@@ -416,6 +422,7 @@ export const refreshToken = async (req, res) => {
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
+      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
@@ -555,7 +562,7 @@ export const forgotPassword = async (req, res) => {
 
     // Buscar usuario por email - INCLUIR google_id
     const [usuarios] = await db.execute(
-      'SELECT id, nombre, email, estado, google_id FROM usuarios WHERE email = ?',
+      'SELECT id, nombre, email, alias_mp, estado, google_id FROM usuarios WHERE email = ?',
       [email]
     );
 
@@ -940,7 +947,7 @@ export const handleGoogleCallback = async (req, res) => {
     console.log('🔍 Buscando usuario existente en la base de datos...');
     const [existingUsers] = await db.execute(`
       SELECT 
-        u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, u.email_verificado,
+        u.id, u.nombre, u.apellido, u.email, u.rol, u.alias_mp, u.estado, u.email_verificado,
         u.institucion_id, u.google_id, i.nombre as institucion_nombre
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -987,10 +994,10 @@ export const handleGoogleCallback = async (req, res) => {
 
         const [result] = await db.execute(`
           INSERT INTO usuarios (
-            nombre, apellido, email, password, telefono, dni, 
+            nombre, apellido, email, password, telefono, dni, alias_mp, 
             rol, institucion_id, google_id, email_verificado,
             estado, fecha_creacion, fecha_actualizacion
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', NOW(), NOW())
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', NOW(), NOW())
         `, [
           datosUsuario.nombre,
           datosUsuario.apellido, 
@@ -998,6 +1005,7 @@ export const handleGoogleCallback = async (req, res) => {
           datosUsuario.password,     // null para usuarios Google
           datosUsuario.telefono,     // null
           datosUsuario.dni,          // null
+          datosUsuario.alias_mp,
           datosUsuario.rol,
           datosUsuario.institucion_id, // null
           datosUsuario.google_id,
@@ -1008,7 +1016,7 @@ export const handleGoogleCallback = async (req, res) => {
 
         // Obtener el usuario creado
         const [nuevoUsuario] = await db.execute(`
-          SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.estado, 
+          SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.alias_mp, u.estado, 
                  u.institucion_id, i.nombre as institucion_nombre
           FROM usuarios u
           LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -1024,7 +1032,8 @@ export const handleGoogleCallback = async (req, res) => {
           id: usuario.id,
           email: usuario.email,
           nombre: usuario.nombre,
-          apellido: usuario.apellido
+          apellido: usuario.apellido,
+          alias_mp:usuario.alias_mp
         });
 
         // Continuar con generación de tokens...
@@ -1044,7 +1053,8 @@ export const handleGoogleCallback = async (req, res) => {
       console.log('✅ Usuario existente encontrado:', {
         id: usuario.id,
         email: usuario.email,
-        estado: usuario.estado
+        estado: usuario.estado,
+        alias_mp: usuario.alias_mp
       });
 
       if (usuario.estado !== 'activo') {
@@ -1087,6 +1097,7 @@ async function generarTokensYRedirigir(usuario, res, returnUrl = null) {
       id: usuario.id,
       email: usuario.email,
       rol: usuario.rol,
+      alias_mp:usuario.alias_mp,
       institucion_id: usuario.institucion_id
     };
 
