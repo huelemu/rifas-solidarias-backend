@@ -8,7 +8,7 @@ dotenv.config();
 export const JWT_CONFIG = {
   ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || 'rifas_access_secret_2024',
   REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || 'rifas_refresh_secret_2024',
-  ACCESS_EXPIRES: process.env.JWT_ACCESS_EXPIRES || '15m',
+  ACCESS_EXPIRES: process.env.JWT_ACCESS_EXPIRES || '60m',
   REFRESH_EXPIRES: process.env.JWT_REFRESH_EXPIRES || '7d'
 };
 
