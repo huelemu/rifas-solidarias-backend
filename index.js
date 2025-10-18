@@ -11,11 +11,13 @@ import db from './src/config/db.js';
 import statsRoutes from './src/routes/statsRoutes.js';
 import dashboardRoutes from './src/routes/dashboard.js';
 import numerosRoutes from './src/routes/numerosRoutes.js';
+import usuariosRoutes from './src/routes/usuarios.js';
+
+
 
 // Importar rutas
 import authRoutes from './src/routes/auth.js';
 import institucionRoutes from './src/routes/instituciones.js';
-import usuariosRoutes from './src/routes/usuarios.js';
 import rifasRoutes from './src/routes/rifas.js'; // ✅ NUEVA RUTA
 import notificationRoutes from './src/routes/notificationRoutes.js';
 
@@ -27,6 +29,7 @@ import { fileURLToPath } from 'url';
 import asignacionRoutes from './src/routes/asignaciones.js';
 import impresionRoutes from './src/routes/impresion.js';
 import compraPublicaRoutes from './src/routes/compraPublica.js';
+import publicRoutes from './src/routes/public.js'; 
 
 
 // Configurar variables de entorno PRIMERO
@@ -599,6 +602,10 @@ console.log('✅ Rutas de notificaciones configuradas');
 // ✅ REGISTRAR RUTA (SIN AUTENTICACIÓN - ES PÚBLICA)
 app.use('/comprar', compraPublicaRoutes);
 console.log('✅ Rutas de compra pública configuradas');
+
+// ✅ RUTAS PÚBLICAS (SIN AUTENTICACIÓN)
+app.use('/public', publicRoutes);
+console.log('✅ Rutas públicas configuradas (sin autenticación)');
 
 // =====================================================
 // DOCUMENTACIÓN SWAGGER

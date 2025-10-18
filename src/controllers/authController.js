@@ -187,7 +187,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
     const accessToken = jwt.sign(
       tokenPayload, 
       process.env.JWT_SECRET, 
-      { expiresIn: '15m' }
+      { expiresIn: '2h' }
     );
 
     const refreshToken = jwt.sign(
@@ -215,7 +215,7 @@ console.log('📝 Datos limpiados:', datosLimpios);
         tokens: {
           accessToken,
           refreshToken,
-          expiresIn: '15m',
+          expiresIn: '2h',
           tokenType: 'Bearer'
         }
       }
@@ -329,7 +329,7 @@ export const login = async (req, res) => {
       institucion_id: usuario.institucion_id
     };
 
-    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '2h' });
     const refreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
 
     // Actualizar último login
@@ -359,7 +359,7 @@ export const login = async (req, res) => {
         tokens: {
           accessToken,
           refreshToken,
-          expiresIn: '15m',
+          expiresIn: '2h',
           tokenType: 'Bearer'
         }
       }
@@ -419,7 +419,7 @@ export const refreshToken = async (req, res) => {
       institucion_id: usuario.institucion_id
     };
 
-    const newAccessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const newAccessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '2h' });
     const newRefreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
@@ -428,7 +428,7 @@ export const refreshToken = async (req, res) => {
       data: {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken,
-        expiresIn: '15m',
+        expiresIn: '2h',
         tokenType: 'Bearer'
       }
     });
@@ -460,7 +460,7 @@ export const me = async (req, res) => {
 
     const [usuarios] = await db.execute(`
       SELECT u.id, u.nombre, u.apellido, u.email, u.rol, u.telefono, u.dni, 
-             u.estado, u.ultimo_login, u.institucion_id, 
+             u.estado, u.alias_mp, u.ultimo_login, u.institucion_id, 
              i.nombre as institucion_nombre, i.logo_url as institucion_logo
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -486,6 +486,7 @@ export const me = async (req, res) => {
         email: usuario.email,
         rol: usuario.rol,
         telefono: usuario.telefono,
+        alias_mp: usuario.alias_mp, 
         dni: usuario.dni,
         estado: usuario.estado,
         ultimo_login: usuario.ultimo_login,
@@ -1089,7 +1090,7 @@ async function generarTokensYRedirigir(usuario, res, returnUrl = null) {
       institucion_id: usuario.institucion_id
     };
 
-    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '2h' });
     const refreshToken = jwt.sign({ id: usuario.id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
 
     console.log('✅ Tokens JWT generados exitosamente');
@@ -1135,10 +1136,10 @@ export const getProfile = me;
 export const updateProfile = async (req, res) => {
   try {
     const userId = req.user.id; // Del token JWT
-    const { nombre, apellido, telefono, alias_mercadopago } = req.body;
+    const { nombre, apellido, telefono, alias_mp } = req.body;
 
     console.log('📝 Actualizando perfil usuario ID:', userId);
-    console.log('📦 Datos recibidos:', { nombre, apellido, telefono, alias_mercadopago });
+    console.log('📦 Datos recibidos:', { nombre, apellido, telefono, alias_mp });
 
     // Construir query dinámico
     const campos = [];
@@ -1147,9 +1148,9 @@ export const updateProfile = async (req, res) => {
     if (nombre) { campos.push('nombre = ?'); valores.push(nombre); }
     if (apellido) { campos.push('apellido = ?'); valores.push(apellido); }
     if (telefono !== undefined) { campos.push('telefono = ?'); valores.push(telefono || null); }
-    if (alias_mercadopago !== undefined) { 
-      campos.push('alias_mercadopago = ?'); 
-      valores.push(alias_mercadopago || null); 
+    if (alias_mp !== undefined) { 
+      campos.push('alias_mp = ?'); 
+      valores.push(alias_mp || null); 
     }
 
     if (campos.length === 0) {
@@ -1170,7 +1171,7 @@ export const updateProfile = async (req, res) => {
     const [usuarios] = await db.execute(`
       SELECT 
         u.id, u.nombre, u.apellido, u.email, u.rol, u.telefono, 
-        u.alias_mercadopago, u.dni, u.estado, u.ultimo_login, u.institucion_id, 
+        u.alias_mp, u.dni, u.estado, u.ultimo_login, u.institucion_id, 
         i.nombre as institucion_nombre, i.logo_url as institucion_logo
       FROM usuarios u
       LEFT JOIN instituciones i ON u.institucion_id = i.id
@@ -1196,7 +1197,7 @@ export const updateProfile = async (req, res) => {
         email: usuario.email,
         rol: usuario.rol,
         telefono: usuario.telefono,
-        alias_mercadopago: usuario.alias_mercadopago,
+        alias_mp: usuario.alias_mp,
         dni: usuario.dni,
         estado: usuario.estado,
         ultimo_login: usuario.ultimo_login,
