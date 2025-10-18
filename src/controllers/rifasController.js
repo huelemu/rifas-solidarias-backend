@@ -1225,6 +1225,78 @@ async obtenerNumeroPublico(req, res) {
   }
 },
 
+/**
+ * ✅ NUEVO: Obtener TODOS los números públicos de una rifa
+ */
+async obtenerNumerosPublicos(req, res) {
+  try {
+    const { rifaId } = req.params;
+    const { estado, page = 1, limit = 100 } = req.query;
+
+    console.log(`📋 Obteniendo números públicos de rifa ${rifaId}`);
+
+    // Calcular offset para paginación
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Query base
+    let whereClause = 'WHERE n.rifa_id = ?';
+    let queryParams = [rifaId];
+
+    // Filtro por estado si se proporciona
+    if (estado && estado !== 'todos') {
+      whereClause += ' AND n.estado = ?';
+      queryParams.push(estado);
+    }
+
+    // Obtener números con paginación
+    const [numeros] = await db.execute(`
+      SELECT 
+        n.id,
+        n.numero,
+        n.estado,
+        n.qr_code,
+        COALESCE(n.precio_venta, r.precio_numero) as precio_venta
+      FROM numeros_rifa n
+      INNER JOIN rifas r ON n.rifa_id = r.id
+      ${whereClause}
+      ORDER BY n.numero ASC
+      LIMIT ? OFFSET ?
+    `, [...queryParams, parseInt(limit), offset]);
+
+    // Contar total para paginación
+    const [totalResult] = await db.execute(`
+      SELECT COUNT(*) as total
+      FROM numeros_rifa n
+      ${whereClause}
+    `, queryParams);
+
+    const total = totalResult[0].total;
+    const totalPages = Math.ceil(total / parseInt(limit));
+
+    console.log(`✅ ${numeros.length} números obtenidos de ${total} totales`);
+
+    res.json({
+      status: 'success',
+      data: {
+        numeros: numeros,
+        total: total
+      },
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: totalPages,
+        total: total
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo números públicos:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener los números'
+    });
+  }
+},
 
  // =====================================================
   // 🖼️ GESTIÓN DE LOGOS DE RIFAS - AGREGAR AQUÍ

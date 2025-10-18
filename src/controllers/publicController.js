@@ -253,6 +253,120 @@ export const getRifaPublica = async (req, res) => {
 };
 
 /**
+ * Obtiene los IDs de números que tienen vendedor asignado
+ */
+export const getNumerosConVendedor = async (req, res) => {
+  try {
+    const { rifaId } = req.params;
+
+    console.log(`📱 Obteniendo números con vendedor de rifa ${rifaId}`);
+
+    const [numeros] = await db.execute(`
+      SELECT DISTINCT nr.id
+      FROM numeros_rifa nr
+      INNER JOIN vendedor_numeros vn ON vn.numero_id = nr.id
+      WHERE nr.rifa_id = ?
+    `, [rifaId]);
+
+    const ids = numeros.map(n => n.id);
+
+    console.log(`✅ ${ids.length} números con vendedor asignado`);
+
+    res.json({
+      success: true,
+      data: ids,
+      total: ids.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error al obtener números con vendedor:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener números con vendedor',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
+/**
+ * Obtener TODOS los números de una rifa con sus datos completos
+ * 
+ * @route GET /public/rifas/:rifaId/numeros
+ * @access Public
+ */
+export const getNumerosRifaPublica = async (req, res) => {
+  try {
+    const { rifaId } = req.params;
+    const { estado, page = 1, limit = 1000 } = req.query;
+
+    console.log(`📋 Obteniendo números públicos de rifa ${rifaId}`);
+
+    // Calcular offset para paginación
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Query base
+    let whereClause = 'WHERE n.rifa_id = ?';
+    let queryParams = [rifaId];
+
+    // Filtro por estado si se proporciona
+    if (estado && estado !== 'todos') {
+      whereClause += ' AND n.estado = ?';
+      queryParams.push(estado);
+    }
+
+    // Obtener números con toda la info
+    const [numeros] = await db.execute(`
+      SELECT 
+        n.id,
+        n.numero,
+        n.estado,
+        n.qr_code,
+        COALESCE(n.precio_venta, r.precio_numero) as precio_venta
+      FROM numeros_rifa n
+      INNER JOIN rifas r ON n.rifa_id = r.id
+      ${whereClause}
+      ORDER BY n.numero ASC
+      LIMIT ? OFFSET ?
+    `, [...queryParams, parseInt(limit), offset]);
+
+    // Contar total
+    const [totalResult] = await db.execute(`
+      SELECT COUNT(*) as total
+      FROM numeros_rifa n
+      ${whereClause}
+    `, queryParams);
+
+    const total = totalResult[0].total;
+    const totalPages = Math.ceil(total / parseInt(limit));
+
+    console.log(`✅ ${numeros.length} números obtenidos de ${total} totales`);
+
+    res.json({
+      success: true,
+      data: {
+        numeros: numeros,
+        total: total
+      },
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: totalPages,
+        total: total
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo números públicos:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener los números',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
  * Obtiene todos los números de una rifa (vista pública)
  * Solo devuelve información básica para mostrar disponibilidad
  * 

@@ -20,6 +20,10 @@ router.get('/:id/numeros', rifasController.obtenerNumerosRifaPublico);
 // RUTAS PÚBLICAS (SIN AUTENTICACIÓN) - AGREGAR AL INICIO
 // =====================================================
 
+
+// ✅ AGREGAR ESTA LÍNEA AQUÍ (ANTES de otras rutas)
+router.get('/rifas/publicas/:rifaId/numeros', rifasController.obtenerNumerosPublicos);
+
 /**
  * @swagger
  * /public/rifas/{rifaId}/numero/{numero}:
