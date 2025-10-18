@@ -10,13 +10,16 @@ import {
   getNumerosRifa,
   getRifasPublicas,
   getNumerosConVendedor,
-  getNumerosRifaPublica  
+  getNumerosRifaPublica,
+  getNumerosDisponiblesConVendedor
 } from '../controllers/publicController.js';
 
 const router = express.Router();
 
-router.get('/rifas/:rifaId/numeros', getNumerosRifaPublica);
+router.get('/rifas/:rifaId/numeros-disponibles', getNumerosDisponiblesConVendedor);
 router.get('/rifas/:rifaId/numeros-con-vendedor', getNumerosConVendedor);
+router.get('/rifas/:rifaId/numeros', getNumerosRifaPublica);
+
 
 /**
  * @swagger

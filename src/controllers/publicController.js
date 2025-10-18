@@ -288,6 +288,75 @@ export const getNumerosConVendedor = async (req, res) => {
   }
 };
 
+/**
+ * Obtener SOLO números disponibles con vendedor asignado (súper rápido)
+ * 
+ * @route GET /public/rifas/:rifaId/numeros-disponibles
+ * @access Public
+ */
+export const getNumerosDisponiblesConVendedor = async (req, res) => {
+  try {
+    const { rifaId } = req.params;
+    const { limit = 100, aleatorios = 'false' } = req.query;
+
+    console.log(`⚡ Obteniendo números disponibles con vendedor de rifa ${rifaId}`);
+
+    let query = `
+      SELECT 
+        n.id,
+        n.numero,
+        n.estado,
+        n.qr_code,
+        COALESCE(n.precio_venta, r.precio_numero) as precio_venta
+      FROM numeros_rifa n
+      INNER JOIN rifas r ON n.rifa_id = r.id
+      INNER JOIN vendedor_numeros vn ON vn.numero_id = n.id
+      WHERE n.rifa_id = ? 
+      AND n.estado = 'disponible'
+    `;
+
+    // Si se piden aleatorios, ordenar random
+    if (aleatorios === 'true') {
+      query += ` ORDER BY RAND()`;
+    } else {
+      query += ` ORDER BY n.numero ASC`;
+    }
+
+    query += ` LIMIT ?`;
+
+    const [numeros] = await db.execute(query, [rifaId, parseInt(limit)]);
+
+    // Contar total de disponibles con vendedor
+    const [totalResult] = await db.execute(`
+      SELECT COUNT(*) as total
+      FROM numeros_rifa n
+      INNER JOIN vendedor_numeros vn ON vn.numero_id = n.id
+      WHERE n.rifa_id = ? 
+      AND n.estado = 'disponible'
+    `, [rifaId]);
+
+    const total = totalResult[0].total;
+
+    console.log(`✅ ${numeros.length} números disponibles de ${total} totales`);
+
+    res.json({
+      success: true,
+      data: {
+        numeros: numeros,
+        total: total,
+        mostrando: numeros.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener números disponibles',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 
 /**
  * Obtener TODOS los números de una rifa con sus datos completos
