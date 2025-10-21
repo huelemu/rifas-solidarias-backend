@@ -5,6 +5,7 @@
 // =====================================================
 
 import { Router } from 'express';
+import { body } from 'express-validator';
 import { requireAuth, requireRole, optionalAuth} from '../middleware/auth.js';
 import rifasController, { rifasValidations } from '../controllers/rifasController.js';
 import { uploadLogoRifa } from '../config/upload.js';
@@ -255,6 +256,19 @@ router.put(
   requireRole(['admin_global', 'admin_institucion']),
   rifasValidations.actualizarRifa,
   rifasController.actualizarRifa
+);
+
+
+/**
+ * PATCH /rifas/:id/cantidad-numeros
+ * Actualizar solo la cantidad de números de una rifa
+ */
+router.patch(
+  '/:id/cantidad-numeros',
+  requireAuth,
+  requireRole(['admin_global', 'admin_institucion']),
+  body('nueva_cantidad').isInt({ min: 1, max: 100000 }).withMessage('Cantidad inválida'),
+  rifasController.actualizarCantidadNumeros
 );
 
 /**

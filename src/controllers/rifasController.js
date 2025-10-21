@@ -20,15 +20,51 @@ const rifasController = {
   // CRUD BÁSICO DE RIFAS
   // =====================================================
 
-  async listarRifas(req, res) {
-    try {
-      const [rifas] = await db.execute('SELECT * FROM rifas ORDER BY fecha_creacion DESC');
-      res.json({ status: 'success', data: rifas });
-    } catch (error) {
-      console.error('Error al listar rifas:', error);
-      res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
-    }
-  },
+async listarRifas(req, res) {
+  try {
+    const [rifas] = await db.execute(`
+      SELECT 
+        r.*,
+        i.nombre as institucion_nombre,
+        i.nombre as institucion_promotora_nombre,
+        i.logo_url as institucion_logo,
+        
+        -- ✅ Estadísticas
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id) as total_numeros_generados,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as numeros_vendidos,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'disponible') as numeros_disponibles,
+        
+        -- ✅ Recaudación SOLO de ventas reales (precio > 0)
+        (SELECT COALESCE(SUM(precio_venta), 0) 
+         FROM numeros_rifa 
+         WHERE rifa_id = r.id AND estado = 'vendido' AND precio_venta > 0
+        ) as total_recaudado
+        
+      FROM rifas r
+      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+      ORDER BY r.fecha_creacion DESC
+    `);
+
+    // ✅ Calcular porcentaje vendido para cada rifa
+    const rifasConEstadisticas = rifas.map(rifa => ({
+      ...rifa,
+      porcentaje_vendido: rifa.total_numeros_generados > 0 
+        ? Math.round((rifa.numeros_vendidos / rifa.total_numeros_generados) * 100)
+        : 0
+    }));
+
+    res.json({ 
+      status: 'success', 
+      data: rifasConEstadisticas 
+    });
+  } catch (error) {
+    console.error('Error al listar rifas:', error);
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Error interno del servidor' 
+    });
+  }
+},
 
   async obtenerRifa(req, res) {
     try {
@@ -348,6 +384,146 @@ const rifasController = {
       connection.release();
     }
   },
+
+async actualizarCantidadNumeros(req, res) {
+  const connection = await db.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+    const { nueva_cantidad } = req.body;
+
+    console.log('🔢 Actualizando cantidad de números:', { id, nueva_cantidad });
+
+    // Validar
+    if (!nueva_cantidad || nueva_cantidad < 1 || nueva_cantidad > 100000) {
+      await connection.rollback();
+      return res.status(400).json({
+        status: 'error',
+        message: 'La cantidad debe estar entre 1 y 100,000'
+      });
+    }
+
+    // Verificar que la rifa existe
+    const [rifas] = await connection.execute(
+      'SELECT * FROM rifas WHERE id = ?',
+      [id]
+    );
+
+    if (rifas.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        status: 'error',
+        message: 'Rifa no encontrada'
+      });
+    }
+
+    const rifa = rifas[0];
+    const cantidadAnterior = rifa.cantidad_numeros;
+
+    // ✅ CASO 1: Aumentar números
+    if (nueva_cantidad > cantidadAnterior) {
+      const numerosAAgregar = nueva_cantidad - cantidadAnterior;
+      const institucion_id = rifa.institucion_promotora_id;
+      
+      console.log(`➕ Agregando ${numerosAAgregar} números nuevos`);
+
+      const numerosValues = [];
+      const crypto = await import('crypto');
+
+      for (let num = cantidadAnterior + 1; num <= nueva_cantidad; num++) {
+        const hash = crypto.default
+          .createHash('sha256')
+          .update(`${id}-${num}-${Date.now()}-${Math.random()}`)
+          .digest('hex');
+        
+        const qrCode = `RIFA${id}-${String(num).padStart(6, '0')}-${Date.now()}`;
+        
+        numerosValues.push(
+          `(${id}, ${num}, ${institucion_id}, '${qrCode}', '${hash}')`
+        );
+      }
+
+      // Insertar en lotes de 500
+      const batchSize = 500;
+      for (let i = 0; i < numerosValues.length; i += batchSize) {
+        const batch = numerosValues.slice(i, i + batchSize);
+        await connection.execute(
+          `INSERT INTO numeros_rifa (rifa_id, numero, institucion_id, qr_code, hash_verificacion)
+           VALUES ${batch.join(',')}`
+        );
+      }
+    }
+    
+    // ✅ CASO 2: Disminuir números (solo si no están vendidos)
+    else if (nueva_cantidad < cantidadAnterior) {
+      // Verificar que los números a eliminar no estén vendidos
+      const [vendidos] = await connection.execute(
+        `SELECT COUNT(*) as total 
+         FROM numeros_rifa 
+         WHERE rifa_id = ? AND numero > ? AND estado = 'vendido'`,
+        [id, nueva_cantidad]
+      );
+
+      if (vendidos[0].total > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          status: 'error',
+          message: `No se puede reducir: hay ${vendidos[0].total} números vendidos en el rango que se eliminaría`
+        });
+      }
+
+      // Eliminar números disponibles mayores a la nueva cantidad
+      await connection.execute(
+        `DELETE FROM numeros_rifa 
+         WHERE rifa_id = ? AND numero > ?`,
+        [id, nueva_cantidad]
+      );
+
+      console.log(`➖ Números eliminados: desde ${nueva_cantidad + 1} hasta ${cantidadAnterior}`);
+    }
+
+    // Actualizar cantidad en la tabla rifas
+    await connection.execute(
+      'UPDATE rifas SET cantidad_numeros = ?, fecha_actualizacion = NOW() WHERE id = ?',
+      [nueva_cantidad, id]
+    );
+
+    await connection.commit();
+
+    // Obtener rifa actualizada con estadísticas
+    const [rifaActualizada] = await connection.execute(`
+      SELECT 
+        r.*,
+        i.nombre as institucion_nombre,
+        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id) as total_numeros_generados
+      FROM rifas r
+      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+      WHERE r.id = ?
+    `, [id]);
+
+    console.log('✅ Cantidad de números actualizada exitosamente');
+
+    res.json({
+      status: 'success',
+      message: `Cantidad actualizada de ${cantidadAnterior} a ${nueva_cantidad}`,
+      data: rifaActualizada[0]
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('❌ Error actualizando cantidad de números:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al actualizar cantidad de números',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+},
+
 
   async eliminarRifa(req, res) {
     try {
