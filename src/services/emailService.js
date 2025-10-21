@@ -773,6 +773,259 @@ export function verificarConfiguracionEmail() {
   return hasAWSConfig;
 }
 
+// =====================================================
+// EMAIL DE CONFIRMACIÓN DE VENTA AL COMPRADOR
+// =====================================================
+
+export async function enviarEmailConfirmacionVenta(datosVenta) {
+  try {
+    const {
+      numero,
+      rifa,
+      comprador,
+      vendedor,
+      qrCodeUrl
+    } = datosVenta;
+
+    const asunto = `🎉 ¡Confirmación de compra - Ticket: ${numero.numero} - ${rifa.nombre}`;
+    
+    const cuerpo = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+          }
+          .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+          }
+          .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px 20px;
+            text-align: center;
+            color: white;
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 28px;
+          }
+          .content {
+            padding: 40px 30px;
+          }
+          .ticket-info {
+            background: #f7fafc;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+          }
+          .ticket-number {
+            font-size: 48px;
+            font-weight: bold;
+            color: #667eea;
+            text-align: center;
+            margin: 20px 0;
+          }
+          .qr-container {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            background: #fff;
+            border: 2px dashed #e2e8f0;
+            border-radius: 8px;
+          }
+          .qr-code {
+            max-width: 250px;
+            height: auto;
+          }
+          .info-section {
+            background: #fffaf0;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+          }
+          .info-section h3 {
+            margin-top: 0;
+            color: #667eea;
+            font-size: 18px;
+          }
+          .info-row {
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+          }
+          .info-row:last-child {
+            border-bottom: none;
+          }
+          .info-label {
+            font-weight: 600;
+            color: #666;
+          }
+          .info-value {
+            color: #333;
+          }
+          .footer {
+            background: #f9f9f9;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+          }
+          .btn-whatsapp {
+            display: inline-block;
+            background: #25D366;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 25px;
+            font-weight: bold;
+            margin: 20px 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <!-- HEADER -->
+          <div class="header">
+            <h1>🎫 ¡Compra Confirmada!</h1>
+            <p style="margin: 10px 0 0 0; font-size: 16px;">Gracias por participar de nuestro evento</p>
+          </div>
+          
+          <!-- CONTENIDO -->
+          <div class="content">
+            <p style="font-size: 18px; margin-bottom: 20px;">
+              Hola <strong>${comprador.nombre}</strong>,
+            </p>
+            
+            <p>Tu Ticket ha sido registrado exitosamente. ¡Mucha suerte! 🍀</p>
+            
+            <!-- NÚMERO -->
+            <div class="ticket-number">
+              #${numero.numero.toString().padStart(3, '0')}
+            </div>
+            
+            <!-- INFORMACIÓN DE LA RIFA -->
+            <div class="ticket-info">
+              <h3 style="margin-top: 0;">📋 Detalles del Evento</h3>
+              <div class="info-row">
+                <span class="info-label">Evento:</span>
+                <span class="info-value">${rifa.nombre}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Precio:</span>
+                <span class="info-value">$${numero.precio_venta ? Number(numero.precio_venta).toLocaleString('es-AR') : 'N/A'}</span>
+              </div>
+              ${rifa.fecha_sorteo ? `
+              <div class="info-row">
+                <span class="info-label">Fecha:</span>
+                <span class="info-value">${new Date(rifa.fecha_sorteo).toLocaleDateString('es-AR', { 
+                  weekday: 'long', 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric' 
+                })}</span>
+              </div>
+              ` : ''}
+              <div class="info-row">
+                <span class="info-label">Método de pago:</span>
+                <span class="info-value">${numero.metodo_pago || 'No especificado'}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Fecha de compra:</span>
+                <span class="info-value">${new Date().toLocaleDateString('es-AR')} - ${new Date().toLocaleTimeString('es-AR')}</span>
+              </div>
+            </div>
+            
+            <!-- CÓDIGO QR -->
+            <div class="qr-container">
+              <h3 style="margin-top: 0; color: #667eea;">📱 Tu Código QR</h3>
+              <p style="font-size: 14px; color: #666; margin-bottom: 15px;">
+                Guarda este código para validar tu número el día del sorteo
+              </p>
+              <img src="${qrCodeUrl}" alt="Código QR" class="qr-code" />
+            </div>
+            
+            <!-- INFORMACIÓN DEL VENDEDOR -->
+            ${vendedor && vendedor.nombre ? `
+            <div class="info-section">
+              <h3>👤 Información del Vendedor</h3>
+              <div class="info-row">
+                <span class="info-label">Nombre:</span>
+                <span class="info-value">${vendedor.nombre} ${vendedor.apellido || ''}</span>
+              </div>
+              ${vendedor.telefono ? `
+              <div class="info-row">
+                <span class="info-label">Teléfono:</span>
+                <span class="info-value">${vendedor.telefono}</span>
+              </div>
+              ` : ''}
+              ${vendedor.email ? `
+              <div class="info-row">
+                <span class="info-label">Email:</span>
+                <span class="info-value">${vendedor.email}</span>
+              </div>
+              ` : ''}
+            </div>
+            ` : ''}
+            
+            <!-- BOTÓN WHATSAPP (OPCIONAL) -->
+            ${vendedor && vendedor.telefono ? `
+            <div style="text-align: center;">
+              <a href="https://wa.me/${vendedor.telefono.replace(/[^0-9]/g, '')}?text=Hola,%20compré%20el%20número%20${numero.numero}%20de%20la%20rifa%20${encodeURIComponent(rifa.nombre)}" class="btn-whatsapp">
+                💬 Contactar al Vendedor
+              </a>
+            </div>
+            ` : ''}
+            
+            <!-- MENSAJE FINAL -->
+            <div style="background: #e6f7ff; padding: 15px; border-radius: 8px; margin-top: 30px;">
+              <p style="margin: 0; font-size: 14px; color: #0066cc;">
+                <strong>💡 Importante:</strong> Conserva este email y tu código QR. Lo necesitarás...
+              </p>
+            </div>
+          </div>
+          
+          <!-- FOOTER -->
+          <div class="footer">
+            <p style="margin: 0;">
+              Este es un email automático de confirmación de compra.<br>
+              Huelemu Eventos © ${new Date().getFullYear()}
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    const result = await sendEmail(comprador.email, asunto, cuerpo);
+    
+    console.log('✅ Email de venta enviado a:', comprador.email);
+    return {
+      success: true,
+      messageId: result.MessageId
+    };
+    
+  } catch (error) {
+    console.error('❌ Error enviando email de venta:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 
 // =====================================================
 // VALIDAR CONFIGURACIÓN

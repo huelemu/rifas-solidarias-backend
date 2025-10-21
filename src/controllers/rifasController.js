@@ -1,5 +1,5 @@
 // =====================================================
-// CONTROLADOR COMPLETO PARA EL SISTEMA DE RIFAS - VERSIÓN ESTABLE
+// CONTROLADOR COMPLETO PARA EL SISTEMA DE RIFAS - VERSIÓN LIMPIA
 // =====================================================
 
 import db from '../config/db.js';
@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Rifa } from '../models/Rifa.js';
 import QRCode from 'qrcode';
+import { enviarEmailConfirmacionVenta } from '../services/emailService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,317 +45,309 @@ const rifasController = {
   },
 
   async crearRifa(req, res) {
-  const connection = await db.getConnection();
-  
-  try {
-    await connection.beginTransaction();
+    const connection = await db.getConnection();
+    
+    try {
+      await connection.beginTransaction();
 
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      await connection.rollback();
-      return res.status(400).json({ status: 'error', errors: errors.array() });
-    }
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        await connection.rollback();
+        return res.status(400).json({ status: 'error', errors: errors.array() });
+      }
 
-    const {
-      nombre,
-      descripcion,
-      institucion_promotora_id,
-      cantidad_numeros,
-      precio_numero,
-      fecha_inicio,
-      fecha_fin,
-      fecha_sorteo,
-      imagen_url,
-      estado
-    } = req.body;
-
-    console.log('📝 Creando nueva rifa:', { nombre, cantidad_numeros, precio_numero });
-
-    // Validaciones
-    if (!nombre || !cantidad_numeros || !precio_numero || !institucion_promotora_id) {
-      await connection.rollback();
-      return res.status(400).json({
-        status: 'error',
-        message: 'Nombre, cantidad de números, precio e institución promotora son requeridos'
-      });
-    }
-
-    if (!fecha_inicio || !fecha_fin) {
-      await connection.rollback();
-      return res.status(400).json({
-        status: 'error',
-        message: 'Fecha de inicio y fecha de fin son requeridas'
-      });
-    }
-
-    if (cantidad_numeros < 1 || cantidad_numeros > 100000) {
-      await connection.rollback();
-      return res.status(400).json({
-        status: 'error',
-        message: 'La cantidad de números debe estar entre 1 y 100,000'
-      });
-    }
-
-    if (precio_numero <= 0) {
-      await connection.rollback();
-      return res.status(400).json({
-        status: 'error',
-        message: 'El precio debe ser mayor a 0'
-      });
-    }
-
-    // Verificar que la institución existe
-    const [instituciones] = await connection.execute(
-      'SELECT id FROM instituciones WHERE id = ? AND estado = "activa"',
-      [institucion_promotora_id]
-    );
-
-    if (instituciones.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({
-        status: 'error',
-        message: 'Institución no encontrada o inactiva'
-      });
-    }
-
-    // Insertar rifa
-    const [result] = await connection.execute(
-      `INSERT INTO rifas (
-        nombre, 
-        descripcion, 
-        cantidad_numeros, 
-        precio_numero, 
+      const {
+        nombre,
+        descripcion,
         institucion_promotora_id,
+        cantidad_numeros,
+        precio_numero,
+        fecha_inicio,
+        fecha_fin,
+        fecha_sorteo,
+        imagen_url,
+        estado
+      } = req.body;
+
+      console.log('📝 Creando nueva rifa:', { nombre, cantidad_numeros, precio_numero });
+
+      // Validaciones
+      if (!nombre || !cantidad_numeros || !precio_numero || !institucion_promotora_id) {
+        await connection.rollback();
+        return res.status(400).json({
+          status: 'error',
+          message: 'Nombre, cantidad de números, precio e institución promotora son requeridos'
+        });
+      }
+
+      if (!fecha_inicio || !fecha_fin) {
+        await connection.rollback();
+        return res.status(400).json({
+          status: 'error',
+          message: 'Fecha de inicio y fecha de fin son requeridas'
+        });
+      }
+
+      if (cantidad_numeros < 1 || cantidad_numeros > 100000) {
+        await connection.rollback();
+        return res.status(400).json({
+          status: 'error',
+          message: 'La cantidad de números debe estar entre 1 y 100,000'
+        });
+      }
+
+      if (precio_numero <= 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          status: 'error',
+          message: 'El precio debe ser mayor a 0'
+        });
+      }
+
+      // Verificar que la institución existe
+      const [instituciones] = await connection.execute(
+        'SELECT id FROM instituciones WHERE id = ? AND estado = "activa"',
+        [institucion_promotora_id]
+      );
+
+      if (instituciones.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          status: 'error',
+          message: 'Institución no encontrada o inactiva'
+        });
+      }
+
+      // Insertar rifa
+      const [result] = await connection.execute(
+        `INSERT INTO rifas (
+          nombre, 
+          descripcion, 
+          cantidad_numeros, 
+          precio_numero, 
+          institucion_promotora_id,
+          fecha_inicio,
+          fecha_fin,
+          fecha_sorteo,
+          imagen_url,
+          estado,
+          creado_por,
+          fecha_creacion
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          nombre,
+          descripcion || '',
+          cantidad_numeros,
+          precio_numero,
+          institucion_promotora_id,
+          fecha_inicio,
+          fecha_fin,
+          fecha_sorteo || null,
+          imagen_url || null,
+          estado || 'borrador',
+          req.user?.id || null
+        ]
+      );
+
+      const rifaId = result.insertId;
+
+      // Generar números automáticamente
+      console.log(`🔢 Generando ${cantidad_numeros} números...`);
+
+      const numerosValues = [];
+      const crypto = await import('crypto');
+
+      for (let num = 1; num <= cantidad_numeros; num++) {
+        const hash = crypto.default
+          .createHash('sha256')
+          .update(`${rifaId}-${num}-${Date.now()}-${Math.random()}`)
+          .digest('hex');
+        
+        const qrCode = `RIFA${rifaId}-${String(num).padStart(6, '0')}-${Date.now()}`;
+        
+        numerosValues.push(
+          `(${rifaId}, ${num}, ${institucion_promotora_id}, '${qrCode}', '${hash}')`
+        );
+      }
+
+      // Insertar números en lotes de 500
+      const batchSize = 500;
+      for (let i = 0; i < numerosValues.length; i += batchSize) {
+        const batch = numerosValues.slice(i, i + batchSize);
+        await connection.execute(
+          `INSERT INTO numeros_rifa (rifa_id, numero, institucion_id, qr_code, hash_verificacion)
+           VALUES ${batch.join(',')}`
+        );
+      }
+
+      console.log(`✅ ${cantidad_numeros} números generados y asignados a institución promotora`);
+
+      await connection.commit();
+
+      // Obtener rifa creada
+      const [rifaCreada] = await db.execute(
+        `SELECT r.*, i.nombre as institucion_nombre
+         FROM rifas r
+         INNER JOIN instituciones i ON r.institucion_promotora_id = i.id
+         WHERE r.id = ?`,
+        [rifaId]
+      );
+
+      res.status(201).json({
+        status: 'success',
+        message: 'Rifa creada exitosamente',
+        data: rifaCreada[0]
+      });
+
+    } catch (error) {
+      await connection.rollback();
+      console.error('❌ Error al crear rifa:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al crear rifa',
+        error: error.message
+      });
+    } finally {
+      connection.release();
+    }
+  },
+
+  async actualizarRifa(req, res) {
+    const connection = await db.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      const { id } = req.params;
+      const {
+        nombre,
+        descripcion,
+        cantidad_numeros,
+        precio_numero,
         fecha_inicio,
         fecha_fin,
         fecha_sorteo,
         imagen_url,
         estado,
-        creado_por,
-        fecha_creacion
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        nombre,
-        descripcion || '',
-        cantidad_numeros,
-        precio_numero,
-        institucion_promotora_id,
-        fecha_inicio,
-        fecha_fin,
-        fecha_sorteo || null,
-        imagen_url || null,
-        estado || 'borrador',
-        req.user?.id || null
-      ]
-    );
+        institucion_promotora_id
+      } = req.body;
 
-    const rifaId = result.insertId;
+      console.log('📝 Actualizando rifa:', { id, nombre, estado });
 
-    // ✅ GENERAR NÚMEROS AUTOMÁTICAMENTE
-console.log(`🔢 Generando ${cantidad_numeros} números...`);
+      // Verificar que la rifa existe
+      const [rifaExistente] = await connection.execute(
+        'SELECT id FROM rifas WHERE id = ?',
+        [id]
+      );
 
-const numerosValues = [];
-const crypto = await import('crypto');
+      if (rifaExistente.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          status: 'error',
+          message: 'Rifa no encontrada'
+        });
+      }
 
-for (let num = 1; num <= cantidad_numeros; num++) {
-  const hash = crypto.default
-    .createHash('sha256')
-    .update(`${rifaId}-${num}-${Date.now()}-${Math.random()}`)
-    .digest('hex');
-  
-  const qrCode = `RIFA${rifaId}-${String(num).padStart(6, '0')}-${Date.now()}`;
-  
-  // ✅ AGREGAR institucion_id (institución promotora)
-  numerosValues.push(
-    `(${rifaId}, ${num}, ${institucion_promotora_id}, '${qrCode}', '${hash}')`
-  );
-}
+      // Construir query dinámicamente
+      const updates = [];
+      const values = [];
 
-// Insertar números en lotes de 500
-const batchSize = 500;
-for (let i = 0; i < numerosValues.length; i += batchSize) {
-  const batch = numerosValues.slice(i, i + batchSize);
-  await connection.execute(
-    // ✅ AGREGAR institucion_id al INSERT
-    `INSERT INTO numeros_rifa (rifa_id, numero, institucion_id, qr_code, hash_verificacion)
-     VALUES ${batch.join(',')}`
-  );
-}
+      if (nombre !== undefined) {
+        updates.push('nombre = ?');
+        values.push(nombre);
+      }
 
-console.log(`✅ ${cantidad_numeros} números generados y asignados a institución promotora`);
+      if (descripcion !== undefined) {
+        updates.push('descripcion = ?');
+        values.push(descripcion);
+      }
 
-    await connection.commit();
+      if (cantidad_numeros !== undefined) {
+        updates.push('cantidad_numeros = ?');
+        values.push(cantidad_numeros);
+      }
 
-    // Obtener rifa creada
-    const [rifaCreada] = await db.execute(
-      `SELECT r.*, i.nombre as institucion_nombre
-       FROM rifas r
-       INNER JOIN instituciones i ON r.institucion_promotora_id = i.id
-       WHERE r.id = ?`,
-      [rifaId]
-    );
+      if (precio_numero !== undefined) {
+        updates.push('precio_numero = ?');
+        values.push(precio_numero);
+      }
 
-    res.status(201).json({
-      status: 'success',
-      message: 'Rifa creada exitosamente',
-      data: rifaCreada[0]
-    });
+      if (fecha_inicio !== undefined) {
+        updates.push('fecha_inicio = ?');
+        values.push(fecha_inicio);
+      }
 
-  } catch (error) {
-    await connection.rollback();
-    console.error('❌ Error al crear rifa:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al crear rifa',
-      error: error.message
-    });
-  } finally {
-    connection.release();
-  }
-},
+      if (fecha_fin !== undefined) {
+        updates.push('fecha_fin = ?');
+        values.push(fecha_fin);
+      }
 
-async actualizarRifa(req, res) {
-  const connection = await db.getConnection();
-  
-  try {
-    await connection.beginTransaction();
+      if (fecha_sorteo !== undefined) {
+        updates.push('fecha_sorteo = ?');
+        values.push(fecha_sorteo || null);
+      }
 
-    const { id } = req.params;
-    const {
-      nombre,
-      descripcion,
-      cantidad_numeros,
-      precio_numero,
-      fecha_inicio,
-      fecha_fin,
-      fecha_sorteo,
-      imagen_url,
-      estado,
-      institucion_promotora_id
-    } = req.body;
+      if (imagen_url !== undefined) {
+        updates.push('imagen_url = ?');
+        values.push(imagen_url || null);
+      }
 
-    console.log('📝 Actualizando rifa:', { id, nombre, estado });
+      if (estado !== undefined) {
+        updates.push('estado = ?');
+        values.push(estado);
+      }
 
-    // Verificar que la rifa existe
-    const [rifaExistente] = await connection.execute(
-      'SELECT id FROM rifas WHERE id = ?',
-      [id]
-    );
+      if (institucion_promotora_id !== undefined) {
+        updates.push('institucion_promotora_id = ?');
+        values.push(institucion_promotora_id);
+      }
 
-    if (rifaExistente.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({
-        status: 'error',
-        message: 'Rifa no encontrada'
+      updates.push('fecha_actualizacion = NOW()');
+
+      if (updates.length === 1) {
+        await connection.rollback();
+        return res.status(400).json({
+          status: 'error',
+          message: 'No se proporcionaron campos para actualizar'
+        });
+      }
+
+      values.push(id);
+
+      const query = `UPDATE rifas SET ${updates.join(', ')} WHERE id = ?`;
+      await connection.execute(query, values);
+
+      await connection.commit();
+
+      // Obtener rifa actualizada
+      const [rifaActualizada] = await db.execute(
+        `SELECT r.*, i.nombre as institucion_nombre
+         FROM rifas r
+         LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+         WHERE r.id = ?`,
+        [id]
+      );
+
+      console.log('✅ Rifa actualizada exitosamente');
+
+      res.json({
+        status: 'success',
+        message: 'Rifa actualizada exitosamente',
+        data: rifaActualizada[0]
       });
-    }
 
-    // Construir query dinámicamente solo con campos que vienen en el body
-    const updates = [];
-    const values = [];
-
-    if (nombre !== undefined) {
-      updates.push('nombre = ?');
-      values.push(nombre);
-    }
-
-    if (descripcion !== undefined) {
-      updates.push('descripcion = ?');
-      values.push(descripcion);
-    }
-
-    if (cantidad_numeros !== undefined) {
-      updates.push('cantidad_numeros = ?');
-      values.push(cantidad_numeros);
-    }
-
-    if (precio_numero !== undefined) {
-      updates.push('precio_numero = ?');
-      values.push(precio_numero);
-    }
-
-    if (fecha_inicio !== undefined) {
-      updates.push('fecha_inicio = ?');
-      values.push(fecha_inicio);
-    }
-
-    if (fecha_fin !== undefined) {
-      updates.push('fecha_fin = ?');
-      values.push(fecha_fin);
-    }
-
-    if (fecha_sorteo !== undefined) {
-      updates.push('fecha_sorteo = ?');
-      values.push(fecha_sorteo || null);
-    }
-
-    if (imagen_url !== undefined) {
-      updates.push('imagen_url = ?');
-      values.push(imagen_url || null);
-    }
-
-    if (estado !== undefined) {
-      updates.push('estado = ?');
-      values.push(estado);
-    }
-
-    if (institucion_promotora_id !== undefined) {
-      updates.push('institucion_promotora_id = ?');
-      values.push(institucion_promotora_id);
-    }
-
-    // Agregar timestamp de actualización
-    updates.push('fecha_actualizacion = NOW()');
-
-    if (updates.length === 1) { // Solo tiene el timestamp
+    } catch (error) {
       await connection.rollback();
-      return res.status(400).json({
+      console.error('❌ Error al actualizar rifa:', error);
+      res.status(500).json({
         status: 'error',
-        message: 'No se proporcionaron campos para actualizar'
+        message: 'Error al actualizar rifa',
+        error: error.message
       });
+    } finally {
+      connection.release();
     }
-
-    // Agregar el ID al final
-    values.push(id);
-
-    // Ejecutar actualización
-    const query = `UPDATE rifas SET ${updates.join(', ')} WHERE id = ?`;
-    console.log('🔄 Query:', query);
-    console.log('📊 Values:', values);
-
-    await connection.execute(query, values);
-
-    await connection.commit();
-
-    // Obtener rifa actualizada
-    const [rifaActualizada] = await db.execute(
-      `SELECT r.*, i.nombre as institucion_nombre
-       FROM rifas r
-       LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
-       WHERE r.id = ?`,
-      [id]
-    );
-
-    console.log('✅ Rifa actualizada exitosamente');
-
-    res.json({
-      status: 'success',
-      message: 'Rifa actualizada exitosamente',
-      data: rifaActualizada[0]
-    });
-
-  } catch (error) {
-    await connection.rollback();
-    console.error('❌ Error al actualizar rifa:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al actualizar rifa',
-      error: error.message
-    });
-  } finally {
-    connection.release();
-  }
-},
+  },
 
   async eliminarRifa(req, res) {
     try {
@@ -367,183 +360,249 @@ async actualizarRifa(req, res) {
     }
   },
 
-  /**
- * Obtener rifa pública (sin autenticación)
- */
-async obtenerRifaPublica(req, res) {
-  try {
-    const { id } = req.params;
+  // =====================================================
+  // RIFAS PÚBLICAS
+  // =====================================================
 
-    const [rifas] = await db.execute(`
-      SELECT 
-        r.*,
-        i.nombre as institucion_nombre,
-        i.logo_url as institucion_logo,
-        u.nombre as creador_nombre,
-        u.apellido as creador_apellido,
-        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id) as total_numeros_generados,
-        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as numeros_vendidos,
-        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'disponible') as numeros_disponibles,
-        (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'reservado') as numeros_reservados,
-        (SELECT SUM(precio_venta) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as total_recaudado
-      FROM rifas r
-      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
-      LEFT JOIN usuarios u ON r.creado_por = u.id
-      WHERE r.id = ? AND r.estado != 'borrador'
-    `, [id]);
+  async obtenerRifaPublica(req, res) {
+    try {
+      const { id } = req.params;
 
-    if (rifas.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Rifa no encontrada o no está disponible públicamente'
-      });
-    }
+      const [rifas] = await db.execute(`
+        SELECT 
+          r.*,
+          i.nombre as institucion_nombre,
+          i.logo_url as institucion_logo,
+          u.nombre as creador_nombre,
+          u.apellido as creador_apellido,
+          (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id) as total_numeros_generados,
+          (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as numeros_vendidos,
+          (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'disponible') as numeros_disponibles,
+          (SELECT COUNT(*) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'reservado') as numeros_reservados,
+          (SELECT SUM(precio_venta) FROM numeros_rifa WHERE rifa_id = r.id AND estado = 'vendido') as total_recaudado
+        FROM rifas r
+        LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+        LEFT JOIN usuarios u ON r.creado_por = u.id
+        WHERE r.id = ? AND r.estado != 'borrador'
+      `, [id]);
 
-    const rifa = rifas[0];
-
-    // Calcular porcentaje vendido
-    if (rifa.total_numeros_generados > 0) {
-      rifa.porcentaje_vendido = Math.round(
-        (rifa.numeros_vendidos / rifa.total_numeros_generados) * 100
-      );
-    } else {
-      rifa.porcentaje_vendido = 0;
-    }
-
-    res.json({
-      status: 'success',
-      data: rifa
-    });
-
-  } catch (error) {
-    console.error('❌ Error obteniendo rifa pública:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al obtener la rifa'
-    });
-  }
-},
-
-
-/**
- * Cambios para ver numeros publicos con el nuevo proceso de compra
- * 
- */
-
-/**
- * GET /rifas/:id/numeros (PÚBLICO - Sin auth)
- * Ver TODOS los números de una rifa con su estado
- */
-async obtenerNumerosRifaPublico(req, res) {
-  try {
-    const { id } = req.params;
-    const { estado, page = 1, limit = 1000 } = req.query;
-
-    // Verificar que la rifa existe
-    const [rifas] = await db.execute(
-      'SELECT * FROM rifas WHERE id = ?',
-      [id]
-    );
-
-    if (rifas.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Rifa no encontrada'
-      });
-    }
-
-    const rifa = rifas[0];
-
-    // Construir query con filtros opcionales
-    let whereClause = 'WHERE rifa_id = ?';
-    const params = [id];
-
-    if (estado && ['disponible', 'reservado', 'vendido'].includes(estado)) {
-      whereClause += ' AND estado = ?';
-      params.push(estado);
-    }
-
-    const offset = (page - 1) * limit;
-
-    // Obtener números (SIN datos sensibles del comprador si no está auth)
-    const [numeros] = await db.execute(`
-      SELECT 
-        id,
-        numero,
-        estado,
-        fecha_venta,
-        CASE 
-          WHEN estado = 'reservado' THEN TIMESTAMPDIFF(MINUTE, NOW(), fecha_expiracion_reserva)
-          ELSE NULL
-        END as minutos_reserva_restantes
-      FROM numeros_rifa
-      ${whereClause}
-      ORDER BY numero ASC
-      LIMIT ? OFFSET ?
-    `, [...params, parseInt(limit), parseInt(offset)]);
-
-    // Contar total
-    const [total] = await db.execute(`
-      SELECT COUNT(*) as total 
-      FROM numeros_rifa 
-      ${whereClause}
-    `, params);
-
-    // Estadísticas generales
-    const [stats] = await db.execute(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN estado = 'disponible' THEN 1 ELSE 0 END) as disponibles,
-        SUM(CASE WHEN estado = 'reservado' THEN 1 ELSE 0 END) as reservados,
-        SUM(CASE WHEN estado = 'vendido' THEN 1 ELSE 0 END) as vendidos,
-        ROUND((SUM(CASE WHEN estado = 'vendido' THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) as porcentaje_vendido
-      FROM numeros_rifa
-      WHERE rifa_id = ?
-    `, [id]);
-
-    res.json({
-      status: 'success',
-      data: {
-        rifa: {
-          id: rifa.id,
-          titulo: rifa.titulo,
-          precio_numero: rifa.precio_numero,
-          cantidad_numeros: rifa.cantidad_numeros
-        },
-        numeros,
-        estadisticas: stats[0],
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: total[0].total,
-          pages: Math.ceil(total[0].total / limit)
-        }
+      if (rifas.length === 0) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Rifa no encontrada o no está disponible públicamente'
+        });
       }
-    });
 
-  } catch (error) {
-    console.error('❌ Error obteniendo números públicos:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al obtener números',
-      error: error.message
-    });
-  }
-},
+      const rifa = rifas[0];
 
-/**
- * Obtener números públicos (sin autenticación)
- */
-async obtenerNumerosPublicos(req, res) {
+      if (rifa.total_numeros_generados > 0) {
+        rifa.porcentaje_vendido = Math.round(
+          (rifa.numeros_vendidos / rifa.total_numeros_generados) * 100
+        );
+      } else {
+        rifa.porcentaje_vendido = 0;
+      }
+
+      res.json({
+        status: 'success',
+        data: rifa
+      });
+
+    } catch (error) {
+      console.error('❌ Error obteniendo rifa pública:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al obtener la rifa'
+      });
+    }
+  },
+
+  async obtenerNumerosRifaPublico(req, res) {
+    try {
+      const { id } = req.params;
+      const { estado, page = 1, limit = 1000 } = req.query;
+
+      const esAdmin = req.user && ['admin_global', 'admin_institucion'].includes(req.user.rol);
+
+      console.log(`📡 obtenerNumerosRifaPublico - Rifa ${id} - Es Admin: ${esAdmin}`);
+
+      const [rifas] = await db.execute('SELECT * FROM rifas WHERE id = ?', [id]);
+
+      if (rifas.length === 0) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Rifa no encontrada'
+        });
+      }
+
+      const rifa = rifas[0];
+
+      let whereClause = 'WHERE nr.rifa_id = ?';
+      const params = [id];
+
+      if (estado && ['disponible', 'reservado', 'vendido'].includes(estado)) {
+        whereClause += ' AND nr.estado = ?';
+        params.push(estado);
+      }
+
+      const offset = (page - 1) * limit;
+
+      const selectFields = esAdmin 
+        ? `
+          nr.id,
+          nr.numero,
+          nr.estado,
+          nr.fecha_venta,
+          nr.metodo_pago,
+          nr.precio_venta,
+          nr.comprador_nombre,
+          nr.comprador_apellido,
+          nr.comprador_telefono,
+          nr.comprador_email,
+          nr.vendedor_id,
+          u.nombre AS vendedor_nombre,
+          u.apellido AS vendedor_apellido,
+          CASE 
+            WHEN nr.estado = 'reservado' THEN TIMESTAMPDIFF(MINUTE, NOW(), nr.fecha_expiracion_reserva)
+            ELSE NULL
+          END as minutos_reserva_restantes
+        `
+        : `
+          nr.id,
+          nr.numero,
+          nr.estado,
+          nr.fecha_venta,
+          CASE 
+            WHEN nr.estado = 'reservado' THEN TIMESTAMPDIFF(MINUTE, NOW(), nr.fecha_expiracion_reserva)
+            ELSE NULL
+          END as minutos_reserva_restantes
+        `;
+
+      const joinClause = esAdmin 
+        ? 'LEFT JOIN usuarios u ON nr.vendedor_id = u.id'
+        : '';
+
+      const [numeros] = await db.execute(`
+        SELECT ${selectFields}
+        FROM numeros_rifa nr
+        ${joinClause}
+        ${whereClause}
+        ORDER BY nr.numero ASC
+        LIMIT ? OFFSET ?
+      `, [...params, parseInt(limit), parseInt(offset)]);
+
+      const [total] = await db.execute(`
+        SELECT COUNT(*) as total 
+        FROM numeros_rifa nr
+        ${whereClause}
+      `, params);
+
+      const [stats] = await db.execute(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN estado = 'disponible' THEN 1 ELSE 0 END) as disponibles,
+          SUM(CASE WHEN estado = 'reservado' THEN 1 ELSE 0 END) as reservados,
+          SUM(CASE WHEN estado = 'vendido' THEN 1 ELSE 0 END) as vendidos,
+          ROUND((SUM(CASE WHEN estado = 'vendido' THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) as porcentaje_vendido
+        FROM numeros_rifa
+        WHERE rifa_id = ?
+      `, [id]);
+
+      res.json({
+        status: 'success',
+        data: {
+          rifa: {
+            id: rifa.id,
+            nombre: rifa.nombre,
+            precio_numero: rifa.precio_numero,
+            cantidad_numeros: rifa.cantidad_numeros
+          },
+          numeros,
+          estadisticas: stats[0],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: total[0].total,
+            pages: Math.ceil(total[0].total / limit)
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error obteniendo números:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al obtener números',
+        error: error.message
+      });
+    }
+  },
+
+  async obtenerNumeroPublico(req, res) { //SINGULAR Numero Publico
+    try {
+      const { rifaId, numero } = req.params;
+
+      console.log(`🔍 Consultando número público: Rifa ${rifaId}, Número ${numero}`);
+
+      const [numeros] = await db.execute(`
+        SELECT 
+          n.id,
+          n.numero,
+          n.qr_code,
+          n.estado,
+          n.precio_venta,
+          n.fecha_venta,
+          n.comprador_nombre,
+          n.comprador_apellido,
+          r.id as rifa_id,
+          r.nombre as rifa_nombre,
+          r.descripcion as rifa_descripcion,
+          r.imagen_url as rifa_imagen,
+          r.precio_numero as rifa_precio,
+          r.fecha_sorteo,
+          r.estado as rifa_estado,
+          i.nombre as institucion_nombre,
+          i.logo_url as institucion_logo
+        FROM numeros_rifa n
+        INNER JOIN rifas r ON n.rifa_id = r.id
+        LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
+        WHERE n.rifa_id = ? AND n.numero = ?
+      `, [rifaId, numero]);
+
+      if (numeros.length === 0) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Número no encontrado'
+        });
+      }
+
+      const numeroData = numeros[0];
+
+      if (numeroData.estado === 'vendido') {
+        numeroData.comprador_nombre = numeroData.comprador_nombre 
+          ? numeroData.comprador_nombre.charAt(0) + '***' 
+          : null;
+        numeroData.comprador_apellido = null;
+      }
+
+      res.json({
+        status: 'success',
+        data: numeroData
+      });
+
+    } catch (error) {
+      console.error('❌ Error obteniendo número público:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al obtener el número'
+      });
+    }
+  },
+
+  async obtenerNumerosPublicos(req, res) { //PlURAL Numeros Publicos
   try {
     const { id } = req.params;
-    const { 
-      estado, 
-      page = 1, 
-      limit = 100,
-      desde,
-      hasta 
-    } = req.query;
+    const { estado, page = 1, limit = 100, desde, hasta } = req.query;
 
     // Verificar que la rifa existe y está activa
     const [rifas] = await db.execute(
@@ -632,102 +691,91 @@ async obtenerNumerosPublicos(req, res) {
 },
 
   // =====================================================
-  // FUNCIONES DE NÚMEROS (Implementadas)
+  // GESTIÓN DE NÚMEROS
   // =====================================================
 
- async generarNumerosRifa(req, res) {
-  try {
-    const { id } = req.params;
-    
-    console.log(`🎯 Generando números para rifa ${id}`);
-
-    // Verificar que la rifa existe
-    const [rifas] = await db.execute(
-      'SELECT * FROM rifas WHERE id = ?',
-      [id]
-    );
-
-    if (rifas.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Rifa no encontrada'
-      });
-    }
-
-    const rifa = rifas[0];
-
-    // Verificar que no se hayan generado ya
-    const [numerosExistentes] = await db.execute(
-      'SELECT COUNT(*) as total FROM numeros_rifa WHERE rifa_id = ?',
-      [id]
-    );
-
-    if (numerosExistentes[0].total > 0) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Los números ya han sido generados para esta rifa'
-      });
-    }
-
-    // ⭐ GUARDAR SOLO EL PATH RELATIVO (sin dominio)
-    const numerosParaInsertar = [];
-    
-    for (let i = 1; i <= rifa.cantidad_numeros; i++) {
-      // ⭐ PATH RELATIVO (funciona en cualquier dominio)
-      const pathRelativo = `/public/rifas/${id}/numero/${i}`;
+  async generarNumerosRifa(req, res) {
+    try {
+      const { id } = req.params;
       
-      // ⭐ QR con path relativo (el frontend lo completará)
-      const qrCodeDataURL = await QRCode.toDataURL(pathRelativo, {
-        errorCorrectionLevel: 'H',
-        margin: 1,
-        width: 300,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF'
+      console.log(`🎯 Generando números para rifa ${id}`);
+
+      const [rifas] = await db.execute('SELECT * FROM rifas WHERE id = ?', [id]);
+
+      if (rifas.length === 0) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Rifa no encontrada'
+        });
+      }
+
+      const rifa = rifas[0];
+
+      const [numerosExistentes] = await db.execute(
+        'SELECT COUNT(*) as total FROM numeros_rifa WHERE rifa_id = ?',
+        [id]
+      );
+
+      if (numerosExistentes[0].total > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Los números ya han sido generados para esta rifa'
+        });
+      }
+
+      const numerosParaInsertar = [];
+      
+      for (let i = 1; i <= rifa.cantidad_numeros; i++) {
+        const pathRelativo = `/public/rifas/${id}/numero/${i}`;
+        
+        const qrCodeDataURL = await QRCode.toDataURL(pathRelativo, {
+          errorCorrectionLevel: 'H',
+          margin: 1,
+          width: 300,
+          color: {
+            dark: '#000000',
+            light: '#FFFFFF'
+          }
+        });
+
+        numerosParaInsertar.push([
+          id,
+          i,
+          qrCodeDataURL,
+          'disponible',
+          rifa.precio_numero
+        ]);
+      }
+
+      const query = `
+        INSERT INTO numeros_rifa 
+          (rifa_id, numero, qr_code, estado, precio_venta) 
+        VALUES ?
+      `;
+
+      await db.query(query, [numerosParaInsertar]);
+
+      console.log(`✅ ${rifa.cantidad_numeros} números generados`);
+
+      res.json({
+        status: 'success',
+        message: 'Números generados exitosamente',
+        data: {
+          rifa_id: id,
+          total_numeros: rifa.cantidad_numeros,
+          estado: 'activa'
         }
       });
 
-      numerosParaInsertar.push([
-        id,                           // rifa_id
-        i,                            // numero
-        qrCodeDataURL,                // qr_code (Data URL)
-        'disponible',                 // estado
-        rifa.precio_numero            // precio
-      ]);
+    } catch (error) {
+      console.error('❌ Error generando números:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error al generar números',
+        error: error.message
+      });
     }
-
-    // Insertar todos los números
-    const query = `
-      INSERT INTO numeros_rifa 
-        (rifa_id, numero, qr_code, estado, precio_venta) 
-      VALUES ?
-    `;
-
-    await db.query(query, [numerosParaInsertar]);
-
-    console.log(`✅ ${rifa.cantidad_numeros} números generados`);
-
-    res.json({
-      status: 'success',
-      message: 'Números generados exitosamente',
-      data: {
-        rifa_id: id,
-        total_numeros: rifa.cantidad_numeros,
-        estado: 'activa'
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error generando números:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al generar números',
-      error: error.message
-    });
-  }
-},
-
-//-----
+  },
 
   async obtenerNumerosRifa(req, res) {
     try {
@@ -741,102 +789,100 @@ async obtenerNumerosPublicos(req, res) {
   },
 
   // =====================================================
-// COMPRAR NÚMEROS
-// =====================================================
-async comprarNumeros(req, res) {
-  try {
-    const { id } = req.params;
-    const { numeros, comprador_info, metodo_pago, observaciones } = req.body;
+  // COMPRAR Y VENDER NÚMEROS
+  // =====================================================
 
-    if (!Array.isArray(numeros) || numeros.length === 0) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Debe seleccionar al menos un número'
-      });
-    }
+  async comprarNumeros(req, res) {
+    try {
+      const { id } = req.params;
+      const { numeros, comprador_info, metodo_pago, observaciones } = req.body;
 
-    // Verificar existencia y disponibilidad
-    const [disponibles] = await db.execute(
-      `SELECT numero FROM numeros_rifa WHERE rifa_id = ? AND numero IN (${numeros.map(() => '?').join(',')}) AND estado = 'disponible'`,
-      [id, ...numeros]
-    );
-
-    if (disponibles.length !== numeros.length) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Uno o más números ya no están disponibles'
-      });
-    }
-
-    // Obtener precio por número
-    const [r] = await db.execute('SELECT precio_numero FROM rifas WHERE id = ?', [id]);
-    const precioNumero = r[0]?.precio_numero || 0;
-    const totalPagado = precioNumero * numeros.length;
-
-    // Actualizar los números como vendidos
-    const placeholders = numeros.map(() => '?').join(',');
-    await db.execute(
-      `UPDATE numeros_rifa 
-       SET estado='vendido', fecha_venta=NOW(), comprador_nombre=?, comprador_telefono=?, metodo_pago=?, observaciones=?
-       WHERE rifa_id=? AND numero IN (${placeholders})`,
-      [
-        `${comprador_info?.nombre || ''} ${comprador_info?.apellido || ''}`.trim(),
-        comprador_info?.telefono || '',
-        metodo_pago || '',
-        observaciones || '',
-        id,
-        ...numeros
-      ]
-    );
-
-    // ✅ Nueva estructura compatible con el frontend
-    res.json({
-      status: 'success',
-      message: 'Números comprados exitosamente',
-      data: {
-        numeros_comprados: numeros,
-        total_pagado: totalPagado
+      if (!Array.isArray(numeros) || numeros.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Debe seleccionar al menos un número'
+        });
       }
-    });
 
-  } catch (error) {
-    console.error('Error al comprar números:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error interno del servidor'
-    });
-  }
-},
+      const [disponibles] = await db.execute(
+        `SELECT numero FROM numeros_rifa WHERE rifa_id = ? AND numero IN (${numeros.map(() => '?').join(',')}) AND estado = 'disponible'`,
+        [id, ...numeros]
+      );
 
-async venderNumero(req, res) {
+      if (disponibles.length !== numeros.length) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Uno o más números ya no están disponibles'
+        });
+      }
+
+      const [r] = await db.execute('SELECT precio_numero FROM rifas WHERE id = ?', [id]);
+      const precioNumero = r[0]?.precio_numero || 0;
+      const totalPagado = precioNumero * numeros.length;
+
+      const placeholders = numeros.map(() => '?').join(',');
+      await db.execute(
+        `UPDATE numeros_rifa 
+         SET estado='vendido', fecha_venta=NOW(), comprador_nombre=?, comprador_telefono=?, metodo_pago=?, observaciones=?
+         WHERE rifa_id=? AND numero IN (${placeholders})`,
+        [
+          `${comprador_info?.nombre || ''} ${comprador_info?.apellido || ''}`.trim(),
+          comprador_info?.telefono || '',
+          metodo_pago || '',
+          observaciones || '',
+          id,
+          ...numeros
+        ]
+      );
+
+      res.json({
+        status: 'success',
+        message: 'Números comprados exitosamente',
+        data: {
+          numeros_comprados: numeros,
+          total_pagado: totalPagado
+        }
+      });
+
+    } catch (error) {
+      console.error('Error al comprar números:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Error interno del servidor'
+      });
+    }
+  },
+
+ async venderNumero(req, res) {
   try {
     const { rifa_id, numero } = req.params;
     const {
       comprador_nombre,
       comprador_apellido = '',
       comprador_telefono = '',
-      comprador_email, // ✅ AHORA ES OBLIGATORIO
+      comprador_email = '',
       metodo_pago,
       observaciones = ''
     } = req.body;
 
     const vendedorId = req.user.id;
 
-    // ✅ VALIDACIÓN OBLIGATORIA DE EMAIL
-    if (!comprador_email) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'El email del comprador es obligatorio'
-      });
-    }
+    console.log('📧 Datos recibidos para venta:');
+    console.log('  - comprador_nombre:', comprador_nombre);
+    console.log('  - comprador_apellido:', comprador_apellido);
+    console.log('  - comprador_telefono:', comprador_telefono);
+    console.log('  - comprador_email:', comprador_email);
+    console.log('  - metodo_pago:', metodo_pago);
 
-    // Validar formato de email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(comprador_email)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'El email del comprador no es válido'
-      });
+    // Validar email solo si se proporciona
+    if (comprador_email && comprador_email.trim() !== '') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(comprador_email)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'El formato del email no es válido'
+        });
+      }
     }
 
     // Validaciones básicas
@@ -882,14 +928,27 @@ async venderNumero(req, res) {
       });
     }
 
-    // Registrar la venta
+    // ✅ CONCATENAR nombre + apellido
+    const nombreCompleto = `${comprador_nombre.trim()} ${comprador_apellido.trim()}`.trim();
+    
+    // ✅ PREPARAR email (null si está vacío)
+    const emailParaBD = (comprador_email && comprador_email.trim() !== '') 
+      ? comprador_email.toLowerCase().trim() 
+      : null;
+
+    console.log('💾 Valores finales para BD:');
+    console.log('  - nombreCompleto:', nombreCompleto);
+    console.log('  - telefono:', comprador_telefono.trim());
+    console.log('  - email:', emailParaBD);
+    console.log('  - metodo_pago:', metodo_pago);
+
+    // ✅ REGISTRAR LA VENTA (sin comprador_apellido, solo nombre completo)
     await db.execute(`
       UPDATE numeros_rifa 
       SET 
         estado = 'vendido',
         vendedor_id = ?,
         comprador_nombre = ?,
-        comprador_apellido = ?,
         comprador_telefono = ?,
         comprador_email = ?, 
         metodo_pago = ?,
@@ -899,10 +958,9 @@ async venderNumero(req, res) {
       WHERE rifa_id = ? AND numero = ?
     `, [
       vendedorId,
-      comprador_nombre.trim(),
-      comprador_apellido.trim(),
+      nombreCompleto,           // ✅ Nombre + Apellido concatenado
       comprador_telefono.trim(),
-      comprador_email.toLowerCase().trim(), // ✅ Normalizar email
+      emailParaBD,              // ✅ Email o null
       metodo_pago,
       rifa.precio_numero,
       observaciones.trim(),
@@ -910,22 +968,85 @@ async venderNumero(req, res) {
       numero
     ]);
 
+    console.log('✅ UPDATE ejecutado correctamente');
+
     // Obtener el número actualizado
     const [numeroActualizado] = await db.execute(`
       SELECT 
         nr.*,
-        CONCAT(v.nombre, ' ', v.apellido) as vendedor_nombre
+        CONCAT(v.nombre, ' ', v.apellido) as vendedor_nombre,
+        v.email as vendedor_email,
+        v.telefono as vendedor_telefono
       FROM numeros_rifa nr
       LEFT JOIN usuarios v ON nr.vendedor_id = v.id
       WHERE nr.rifa_id = ? AND nr.numero = ?
     `, [rifa_id, numero]);
 
-    console.log(`✅ Número ${numero} vendido por vendedor ID ${vendedorId} - Email: ${comprador_email}`);
+    // Generar QR Code
+    const urlPublica = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/public/rifas/${rifa_id}/numero/${numero}`;
+    let qrCodeDataUrl = '';
+    
+    try {
+      qrCodeDataUrl = await QRCode.toDataURL(urlPublica, {
+        width: 300,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      });
+    } catch (qrError) {
+      console.error('Error generando QR:', qrError);
+    }
+
+    // Enviar email solo si se proporcionó
+    let emailEnviado = false;
+    
+    if (emailParaBD) {
+      console.log('📧 Intentando enviar email a:', emailParaBD);
+      
+      const emailResult = await enviarEmailConfirmacionVenta({
+        numero: {
+          numero: numero,
+          precio_venta: rifa.precio_numero,
+          metodo_pago: metodo_pago
+        },
+        rifa: {
+          nombre: rifa.nombre,
+          fecha_sorteo: rifa.fecha_sorteo
+        },
+        comprador: {
+          nombre: comprador_nombre,
+          apellido: comprador_apellido,
+          email: emailParaBD
+        },
+        vendedor: {
+          nombre: numeroActualizado[0]?.vendedor_nombre?.split(' ')[0] || '',
+          apellido: numeroActualizado[0]?.vendedor_nombre?.split(' ').slice(1).join(' ') || '',
+          email: numeroActualizado[0]?.vendedor_email,
+          telefono: numeroActualizado[0]?.vendedor_telefono
+        },
+        qrCodeUrl: qrCodeDataUrl
+      });
+
+      emailEnviado = emailResult.success;
+      
+      if (emailResult.success) {
+        console.log('✅ Email enviado correctamente a:', emailParaBD);
+      } else {
+        console.warn('⚠️ No se pudo enviar el email:', emailResult.error);
+      }
+    } else {
+      console.log('ℹ️ No se proporcionó email, omitiendo envío de confirmación');
+    }
+
+    console.log(`✅ Número ${numero} vendido por vendedor ID ${vendedorId}`);
 
     res.json({
       status: 'success',
       message: `Número ${numero} vendido exitosamente`,
-      data: numeroActualizado[0]
+      data: numeroActualizado[0],
+      email_enviado: emailEnviado
     });
 
   } catch (error) {
@@ -961,7 +1082,6 @@ async venderNumero(req, res) {
         return res.status(400).json({ status: 'error', message: 'Faltan parámetros obligatorios' });
       }
 
-      // Verificar que los números existan y estén disponibles
       const [disponibles] = await db.execute(
         `SELECT COUNT(*) as disponibles FROM numeros_rifa 
          WHERE rifa_id = ? AND numero BETWEEN ? AND ? AND estado = 'disponible'`,
@@ -972,7 +1092,6 @@ async venderNumero(req, res) {
         return res.status(400).json({ status: 'error', message: 'No hay números disponibles en ese rango' });
       }
 
-      // Asignar los números a la institución
       await db.execute(
         `UPDATE numeros_rifa 
          SET estado = 'asignado', institucion_id = ? 
@@ -989,329 +1108,160 @@ async venderNumero(req, res) {
       res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
     }
   },
-  
 
   // =====================================================
-  // FUNCIONES PLACEHOLDER (stubs vacíos para evitar errores)
+  // VENDEDORES
   // =====================================================
 
-  async cancelarVentaNumero(req, res) {
-    res.json({ status: 'success', message: 'Función cancelarVentaNumero pendiente de implementación' });
-  },
+  async obtenerMisRifasVendedor(req, res) {
+    try {
+      const vendedor_id = req.user.id;
 
-  async obtenerMisRifas(req, res) {
-    res.json({ status: 'success', message: 'Función obtenerMisRifas pendiente de implementación' });
-  },
+      const [rifas] = await db.execute(`
+        SELECT DISTINCT
+          r.id,
+          r.nombre,
+          r.descripcion,
+          r.imagen_url,
+          r.estado,
+          r.fecha_inicio,
+          r.fecha_fin,
+          r.fecha_sorteo,
+          COUNT(DISTINCT vn.numero_id) as numeros_asignados,
+          SUM(CASE WHEN n.estado = 'vendido' THEN 1 ELSE 0 END) as numeros_vendidos
+        FROM rifas r
+        INNER JOIN vendedor_numeros vn ON r.id = vn.rifa_id
+        LEFT JOIN numeros_rifa n ON vn.numero_id = n.id
+        WHERE vn.vendedor_id = ?
+        GROUP BY r.id
+        ORDER BY r.fecha_creacion DESC
+      `, [vendedor_id]);
 
-  async obtenerMisNumeros(req, res) {
-    res.json({ status: 'success', message: 'Función obtenerMisNumeros pendiente de implementación' });
-  },
-
-  async obtenerNumerosInstitucion(req, res) {
-    res.json({ status: 'success', message: 'Función obtenerNumerosInstitucion pendiente de implementación' });
-  },
-
-
-
-async obtenerMisRifasVendedor(req, res) {
-  try {
-    const vendedor_id = req.user.id;
-
-    const [rifas] = await db.execute(`
-      SELECT DISTINCT
-        r.id,
-        r.nombre,
-        r.descripcion,
-        r.imagen_url,
-        r.estado,
-        r.fecha_inicio,
-        r.fecha_fin,
-        r.fecha_sorteo,
-        COUNT(DISTINCT vn.numero_id) as numeros_asignados,
-        SUM(CASE WHEN n.estado = 'vendido' THEN 1 ELSE 0 END) as numeros_vendidos
-      FROM rifas r
-      INNER JOIN vendedor_numeros vn ON r.id = vn.rifa_id
-      LEFT JOIN numeros_rifa n ON vn.numero_id = n.id
-      WHERE vn.vendedor_id = ?
-      GROUP BY r.id
-      ORDER BY r.fecha_creacion DESC
-    `, [vendedor_id]);
-
-    res.json({
-      status: 'success',
-      data: rifas
-    });
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ status: 'error', message: error.message });
-  }
-},
-
-// Obtener números asignados al vendedor
-async obtenerNumerosVendedor(req, res) {
-  try {
-    const { rifa_id } = req.params;
-    const vendedor_id = req.user.id;
-
-    const [numeros] = await db.execute(`
-      SELECT 
-        n.id,
-        n.numero,
-        n.estado,
-        n.qr_code,
-        n.comprador_nombre,
-        n.comprador_telefono,
-        n.comprador_email,
-        n.fecha_venta,
-        n.metodo_pago,
-        vn.fecha_asignacion,
-        vn.vendedor_id,
-        u.nombre AS vendedor_nombre,
-        u.apellido AS vendedor_apellido
-      FROM vendedor_numeros vn
-      INNER JOIN numeros_rifa n ON vn.numero_id = n.id
-      INNER JOIN usuarios u ON vn.vendedor_id = u.id
-      WHERE vn.rifa_id = ? AND vn.vendedor_id = ?
-      ORDER BY n.numero ASC
-    `, [rifa_id, vendedor_id]);
-
-    const [rifa] = await db.execute(
-      'SELECT id, nombre, imagen_url, precio_numero FROM rifas WHERE id = ?',
-      [rifa_id]
-    );
-
-    if (!rifa[0]) {
-      return res.status(404).json({ 
-        status: 'error', 
-        message: 'Rifa no encontrada' 
+      res.json({
+        status: 'success',
+        data: rifas
       });
+    } catch (error) {
+      console.error('Error:', error);
+      res.status(500).json({ status: 'error', message: error.message });
     }
+  },
 
-    res.json({
-      status: 'success',
-      data: {
-        rifa: rifa[0],
-        numeros,
-        total_asignados: numeros.length,
-        vendidos: numeros.filter(n => n.estado === 'vendido').length,
-        disponibles: numeros.filter(n => n.estado === 'disponible').length
+  async obtenerNumerosVendedor(req, res) {
+    try {
+      const { rifa_id } = req.params;
+      const vendedor_id = req.user.id;
+
+      const [numeros] = await db.execute(`
+        SELECT 
+          n.id,
+          n.numero,
+          n.estado,
+          n.qr_code,
+          n.comprador_nombre,
+          n.comprador_telefono,
+          n.comprador_email,
+          n.fecha_venta,
+          n.metodo_pago,
+          vn.fecha_asignacion,
+          vn.vendedor_id,
+          u.nombre AS vendedor_nombre,
+          u.apellido AS vendedor_apellido
+        FROM vendedor_numeros vn
+        INNER JOIN numeros_rifa n ON vn.numero_id = n.id
+        INNER JOIN usuarios u ON vn.vendedor_id = u.id
+        WHERE vn.rifa_id = ? AND vn.vendedor_id = ?
+        ORDER BY n.numero ASC
+      `, [rifa_id, vendedor_id]);
+
+      const [rifa] = await db.execute(
+        'SELECT id, nombre, imagen_url, precio_numero FROM rifas WHERE id = ?',
+        [rifa_id]
+      );
+
+      if (!rifa[0]) {
+        return res.status(404).json({ 
+          status: 'error', 
+          message: 'Rifa no encontrada' 
+        });
       }
-    });
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ status: 'error', message: error.message });
-  }
-},
 
-// Vender número como vendedor
-async venderNumeroVendedor(req, res) {
-  try {
-    const { rifa_id, numero } = req.params;
-    const vendedor_id = req.user.id;
-    const { comprador_nombre, comprador_apellido, comprador_telefono, comprador_email } = req.body;
-
-    // Verificar que el número está asignado al vendedor
-    const [asignacion] = await db.execute(`
-      SELECT n.id, n.estado
-      FROM vendedor_numeros vn
-      INNER JOIN numeros_rifa n ON vn.numero_id = n.id
-      WHERE vn.rifa_id = ? 
-        AND vn.vendedor_id = ? 
-        AND n.numero = ?
-    `, [rifa_id, vendedor_id, numero]);
-
-    if (asignacion.length === 0) {
-      return res.status(403).json({ 
-        status: 'error', 
-        message: 'No tienes permiso para vender este número' 
+      res.json({
+        status: 'success',
+        data: {
+          rifa: rifa[0],
+          numeros,
+          total_asignados: numeros.length,
+          vendidos: numeros.filter(n => n.estado === 'vendido').length,
+          disponibles: numeros.filter(n => n.estado === 'disponible').length
+        }
       });
+    } catch (error) {
+      console.error('Error:', error);
+      res.status(500).json({ status: 'error', message: error.message });
     }
+  },
 
-    if (asignacion[0].estado !== 'disponible') {
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'El número no está disponible' 
-      });
-    }
+  async venderNumeroVendedor(req, res) {
+    try {
+      const { rifa_id, numero } = req.params;
+      const vendedor_id = req.user.id;
+      const { comprador_nombre, comprador_apellido, comprador_telefono, comprador_email } = req.body;
 
-    // Marcar como vendido
-    await db.execute(`
-      UPDATE numeros_rifa 
-      SET estado = 'vendido',
-          comprador_nombre = ?,
-          comprador_apellido = ?,
-          comprador_telefono = ?,
-          comprador_email = ?,
-          vendedor_id = ?,
-          fecha_venta = NOW()
-      WHERE id = ?
-    `, [comprador_nombre, comprador_apellido, comprador_telefono, comprador_email, vendedor_id, asignacion[0].id]);
+      const [asignacion] = await db.execute(`
+        SELECT n.id, n.estado
+        FROM vendedor_numeros vn
+        INNER JOIN numeros_rifa n ON vn.numero_id = n.id
+        WHERE vn.rifa_id = ? 
+          AND vn.vendedor_id = ? 
+          AND n.numero = ?
+      `, [rifa_id, vendedor_id, numero]);
 
-    res.json({
-      status: 'success',
-      message: 'Entrada vendida exitosamente',
-      data: { numero }
-    });
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ status: 'error', message: error.message });
-  }
-},
-
-/**
- * GET /public/rifas/:rifaId/numero/:numero
- * Obtener información pública de un número específico
- */
-async obtenerNumeroPublico(req, res) {
-  try {
-    const { rifaId, numero } = req.params;
-
-    console.log(`🔍 Consultando número público: Rifa ${rifaId}, Número ${numero}`);
-
-    // Obtener info del número con datos de la rifa
-    const [numeros] = await db.execute(`
-      SELECT 
-        n.id,
-        n.numero,
-        n.qr_code,
-        n.estado,
-        n.precio_venta,
-        n.fecha_venta,
-        n.comprador_nombre,
-        n.comprador_apellido,
-        r.id as rifa_id,
-        r.nombre as rifa_nombre,
-        r.descripcion as rifa_descripcion,
-        r.imagen_url as rifa_imagen,
-        r.precio_numero as rifa_precio,
-        r.fecha_sorteo,
-        r.estado as rifa_estado,
-        i.nombre as institucion_nombre,
-        i.logo_url as institucion_logo
-      FROM numeros_rifa n
-      INNER JOIN rifas r ON n.rifa_id = r.id
-      LEFT JOIN instituciones i ON r.institucion_promotora_id = i.id
-      WHERE n.rifa_id = ? AND n.numero = ?
-    `, [rifaId, numero]);
-
-    if (numeros.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Número no encontrado'
-      });
-    }
-
-    const numeroData = numeros[0];
-
-    // ✅ Si el número está vendido, ocultar datos sensibles del comprador
-    if (numeroData.estado === 'vendido') {
-      numeroData.comprador_nombre = numeroData.comprador_nombre 
-        ? numeroData.comprador_nombre.charAt(0) + '***' 
-        : null;
-      numeroData.comprador_apellido = null;
-    }
-
-    res.json({
-      status: 'success',
-      data: numeroData
-    });
-
-  } catch (error) {
-    console.error('❌ Error obteniendo número público:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al obtener el número'
-    });
-  }
-},
-
-/**
- * ✅ NUEVO: Obtener TODOS los números públicos de una rifa
- */
-async obtenerNumerosPublicos(req, res) {
-  try {
-    const { rifaId } = req.params;
-    const { estado, page = 1, limit = 100 } = req.query;
-
-    console.log(`📋 Obteniendo números públicos de rifa ${rifaId}`);
-
-    // Calcular offset para paginación
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-
-    // Query base
-    let whereClause = 'WHERE n.rifa_id = ?';
-    let queryParams = [rifaId];
-
-    // Filtro por estado si se proporciona
-    if (estado && estado !== 'todos') {
-      whereClause += ' AND n.estado = ?';
-      queryParams.push(estado);
-    }
-
-    // Obtener números con paginación
-    const [numeros] = await db.execute(`
-      SELECT 
-        n.id,
-        n.numero,
-        n.estado,
-        n.qr_code,
-        COALESCE(n.precio_venta, r.precio_numero) as precio_venta
-      FROM numeros_rifa n
-      INNER JOIN rifas r ON n.rifa_id = r.id
-      ${whereClause}
-      ORDER BY n.numero ASC
-      LIMIT ? OFFSET ?
-    `, [...queryParams, parseInt(limit), offset]);
-
-    // Contar total para paginación
-    const [totalResult] = await db.execute(`
-      SELECT COUNT(*) as total
-      FROM numeros_rifa n
-      ${whereClause}
-    `, queryParams);
-
-    const total = totalResult[0].total;
-    const totalPages = Math.ceil(total / parseInt(limit));
-
-    console.log(`✅ ${numeros.length} números obtenidos de ${total} totales`);
-
-    res.json({
-      status: 'success',
-      data: {
-        numeros: numeros,
-        total: total
-      },
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: totalPages,
-        total: total
+      if (asignacion.length === 0) {
+        return res.status(403).json({ 
+          status: 'error', 
+          message: 'No tienes permiso para vender este número' 
+        });
       }
-    });
 
-  } catch (error) {
-    console.error('❌ Error obteniendo números públicos:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al obtener los números'
-    });
-  }
-},
+      if (asignacion[0].estado !== 'disponible') {
+        return res.status(400).json({ 
+          status: 'error', 
+          message: 'El número no está disponible' 
+        });
+      }
 
- // =====================================================
-  // 🖼️ GESTIÓN DE LOGOS DE RIFAS - AGREGAR AQUÍ
+      await db.execute(`
+        UPDATE numeros_rifa 
+        SET estado = 'vendido',
+            comprador_nombre = ?,
+            comprador_apellido = ?,
+            comprador_telefono = ?,
+            comprador_email = ?,
+            vendedor_id = ?,
+            fecha_venta = NOW()
+        WHERE id = ?
+      `, [comprador_nombre, comprador_apellido, comprador_telefono, comprador_email, vendedor_id, asignacion[0].id]);
+
+      res.json({
+        status: 'success',
+        message: 'Entrada vendida exitosamente',
+        data: { numero }
+      });
+    } catch (error) {
+      console.error('Error:', error);
+      res.status(500).json({ status: 'error', message: error.message });
+    }
+  },
+
+  // =====================================================
+  // GESTIÓN DE LOGOS
   // =====================================================
 
-  /**
-   * POST /rifas/:id/logo - Subir logo de rifa
-   */
   async subirLogoRifa(req, res) {
     try {
       const { id } = req.params;
 
-      console.log('📤 Intentando subir logo para rifa ID:', id);
-
-      // Verificar que existe la rifa
       const [rifas] = await db.execute(
         'SELECT id, imagen_url FROM rifas WHERE id = ?',
         [id]
@@ -1334,27 +1284,21 @@ async obtenerNumerosPublicos(req, res) {
         });
       }
 
-      // Eliminar logo anterior si existe
       const oldLogoUrl = rifas[0].imagen_url;
       if (oldLogoUrl) {
         const oldLogoPath = path.join(__dirname, '../../', oldLogoUrl);
         if (fs.existsSync(oldLogoPath)) {
           fs.unlinkSync(oldLogoPath);
-          console.log('🗑️ Logo anterior eliminado:', oldLogoPath);
         }
       }
 
-      // Construir URL del nuevo logo
       const logoUrl = `/uploads/rifas/${req.file.filename}`;
-      console.log('✅ Nuevo logo guardado en:', logoUrl);
 
-      // Actualizar en la base de datos
       await db.execute(
         'UPDATE rifas SET imagen_url = ?, fecha_actualizacion = NOW() WHERE id = ?',
         [logoUrl, id]
       );
 
-      // Obtener rifa actualizada
       const [rifaActualizada] = await db.execute(
         'SELECT * FROM rifas WHERE id = ?',
         [id]
@@ -1383,9 +1327,6 @@ async obtenerNumerosPublicos(req, res) {
     }
   },
 
-  /**
-   * DELETE /rifas/:id/logo - Eliminar logo de rifa
-   */
   async eliminarLogoRifa(req, res) {
     try {
       const { id } = req.params;
@@ -1411,14 +1352,11 @@ async obtenerNumerosPublicos(req, res) {
         });
       }
 
-      // Eliminar archivo físico
       const logoPath = path.join(__dirname, '../../', logoUrl);
       if (fs.existsSync(logoPath)) {
         fs.unlinkSync(logoPath);
-        console.log('🗑️ Logo eliminado:', logoPath);
       }
 
-      // Actualizar base de datos
       await db.execute(
         'UPDATE rifas SET imagen_url = NULL, fecha_actualizacion = NOW() WHERE id = ?',
         [id]
@@ -1437,12 +1375,32 @@ async obtenerNumerosPublicos(req, res) {
         error: error.message
       });
     }
+  },
+
+  // =====================================================
+  // FUNCIONES PLACEHOLDER
+  // =====================================================
+
+  async cancelarVentaNumero(req, res) {
+    res.json({ status: 'success', message: 'Función cancelarVentaNumero pendiente de implementación' });
+  },
+
+  async obtenerMisRifas(req, res) {
+    res.json({ status: 'success', message: 'Función obtenerMisRifas pendiente de implementación' });
+  },
+
+  async obtenerMisNumeros(req, res) {
+    res.json({ status: 'success', message: 'Función obtenerMisNumeros pendiente de implementación' });
+  },
+
+  async obtenerNumerosInstitucion(req, res) {
+    res.json({ status: 'success', message: 'Función obtenerNumerosInstitucion pendiente de implementación' });
   }
 
 };
 
 // =====================================================
-// VALIDACIONES DE CAMPOS
+// VALIDACIONES
 // =====================================================
 
 export const rifasValidations = {
@@ -1465,4 +1423,3 @@ export const rifasValidations = {
 };
 
 export default rifasController;
-

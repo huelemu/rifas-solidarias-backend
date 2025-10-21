@@ -5,7 +5,7 @@
 // =====================================================
 
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, optionalAuth} from '../middleware/auth.js';
 import rifasController, { rifasValidations } from '../controllers/rifasController.js';
 import { uploadLogoRifa } from '../config/upload.js';
 
@@ -14,7 +14,8 @@ const router = Router();
 // =====================================================
 // RUTA PÚBLICA DE NÚMEROS (ya está)
 // =====================================================
-router.get('/:id/numeros', rifasController.obtenerNumerosRifaPublico);
+router.get('/:id/numeros', optionalAuth, rifasController.obtenerNumerosRifaPublico);
+
 
 // =====================================================
 // RUTAS PÚBLICAS (SIN AUTENTICACIÓN) - AGREGAR AL INICIO
