@@ -623,6 +623,7 @@ async actualizarCantidadNumeros(req, res) {
 
       const offset = (page - 1) * limit;
 
+      // ✅ CORREGIDO: Sin comprador_apellido
       const selectFields = esAdmin 
         ? `
           nr.id,
@@ -632,7 +633,6 @@ async actualizarCantidadNumeros(req, res) {
           nr.metodo_pago,
           nr.precio_venta,
           nr.comprador_nombre,
-          nr.comprador_apellido,
           nr.comprador_telefono,
           nr.comprador_email,
           nr.vendedor_id,
@@ -720,6 +720,7 @@ async actualizarCantidadNumeros(req, res) {
 
       console.log(`🔍 Consultando número público: Rifa ${rifaId}, Número ${numero}`);
 
+      // ✅ CORREGIDO: Sin comprador_apellido
       const [numeros] = await db.execute(`
         SELECT 
           n.id,
@@ -729,7 +730,6 @@ async actualizarCantidadNumeros(req, res) {
           n.precio_venta,
           n.fecha_venta,
           n.comprador_nombre,
-          n.comprador_apellido,
           r.id as rifa_id,
           r.nombre as rifa_nombre,
           r.descripcion as rifa_descripcion,
@@ -754,11 +754,9 @@ async actualizarCantidadNumeros(req, res) {
 
       const numeroData = numeros[0];
 
-      if (numeroData.estado === 'vendido') {
-        numeroData.comprador_nombre = numeroData.comprador_nombre 
-          ? numeroData.comprador_nombre.charAt(0) + '***' 
-          : null;
-        numeroData.comprador_apellido = null;
+      // ✅ CORREGIDO: Anonimizar solo el nombre completo
+      if (numeroData.estado === 'vendido' && numeroData.comprador_nombre) {
+        numeroData.comprador_nombre = numeroData.comprador_nombre.charAt(0) + '***';
       }
 
       res.json({
@@ -996,13 +994,16 @@ async actualizarCantidadNumeros(req, res) {
       const precioNumero = r[0]?.precio_numero || 0;
       const totalPagado = precioNumero * numeros.length;
 
+      // ✅ Concatenar nombre y apellido
+      const nombreCompleto = `${comprador_info?.nombre || ''} ${comprador_info?.apellido || ''}`.trim();
+
       const placeholders = numeros.map(() => '?').join(',');
       await db.execute(
         `UPDATE numeros_rifa 
          SET estado='vendido', fecha_venta=NOW(), comprador_nombre=?, comprador_telefono=?, metodo_pago=?, observaciones=?
          WHERE rifa_id=? AND numero IN (${placeholders})`,
         [
-          `${comprador_info?.nombre || ''} ${comprador_info?.apellido || ''}`.trim(),
+          nombreCompleto,
           comprador_info?.telefono || '',
           metodo_pago || '',
           observaciones || '',
@@ -1382,7 +1383,12 @@ async actualizarCantidadNumeros(req, res) {
     try {
       const { rifa_id, numero } = req.params;
       const vendedor_id = req.user.id;
-      const { comprador_nombre, comprador_apellido, comprador_telefono, comprador_email } = req.body;
+      const { 
+        comprador_nombre, 
+        comprador_apellido = '', 
+        comprador_telefono = '', 
+        comprador_email = '' 
+      } = req.body;
 
       const [asignacion] = await db.execute(`
         SELECT n.id, n.estado
@@ -1407,17 +1413,20 @@ async actualizarCantidadNumeros(req, res) {
         });
       }
 
+      // ✅ CONCATENAR nombre + apellido
+      const nombreCompleto = `${comprador_nombre.trim()} ${comprador_apellido.trim()}`.trim();
+
+      // ✅ CORREGIDO: UPDATE sin comprador_apellido
       await db.execute(`
         UPDATE numeros_rifa 
         SET estado = 'vendido',
             comprador_nombre = ?,
-            comprador_apellido = ?,
             comprador_telefono = ?,
             comprador_email = ?,
             vendedor_id = ?,
             fecha_venta = NOW()
         WHERE id = ?
-      `, [comprador_nombre, comprador_apellido, comprador_telefono, comprador_email, vendedor_id, asignacion[0].id]);
+      `, [nombreCompleto, comprador_telefono, comprador_email, vendedor_id, asignacion[0].id]);
 
       res.json({
         status: 'success',
